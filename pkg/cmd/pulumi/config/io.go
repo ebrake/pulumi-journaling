@@ -18,7 +18,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"maps"
 	"os"
 	"slices"
 	"strings"
@@ -36,6 +38,7 @@ import (
 	"github.com/pulumi/pulumi/sdk/v3/go/common/esc"
 	"github.com/pulumi/pulumi/sdk/v3/go/common/resource/config"
 	"github.com/pulumi/pulumi/sdk/v3/go/common/tokens"
+	"github.com/pulumi/pulumi/sdk/v3/go/common/util/cmdutil"
 	"github.com/pulumi/pulumi/sdk/v3/go/common/util/contract"
 	"github.com/pulumi/pulumi/sdk/v3/go/common/util/logging"
 	"github.com/pulumi/pulumi/sdk/v3/go/common/workspace"
@@ -109,6 +112,7 @@ func getStackConfigurationWithFallback(
 	envOverrides []string,
 ) (backend.StackConfiguration, secrets.Manager, error) {
 	workspaceStack, err := cmdStack.LoadProjectStack(ctx, sink, project, s, configFile)
+	latestConfig := false
 	if err != nil || workspaceStack == nil {
 		if fallbackGetConfig == nil {
 			return backend.StackConfiguration{}, nil, err
@@ -123,6 +127,7 @@ func getStackConfigurationWithFallback(
 		workspaceStack = &workspace.ProjectStack{
 			Config: cfg,
 		}
+		latestConfig = true
 	}
 
 	sm, err := getAndSaveSecretsManager(ctx, ssml, s, workspaceStack, configFile)
@@ -130,13 +135,15 @@ func getStackConfigurationWithFallback(
 		return backend.StackConfiguration{}, nil, err
 	}
 
-	config, err := getStackConfigurationFromProjectStack(ctx, s, project, sm, workspaceStack, envOverrides)
+	config, err := getStackConfigurationFromProjectStack(ctx, s, project, sm, workspaceStack, envOverrides, !latestConfig)
 	if err != nil {
 		return backend.StackConfiguration{}, nil, err
 	}
 	return config, sm, nil
 }
 
+// getStackConfigurationFromProjectStack builds the stack's configuration. configIsLocal says whether workspaceStack's
+// config is the stack's own, rather than a copy of what its latest update ran with.
 func getStackConfigurationFromProjectStack(
 	ctx context.Context,
 	stack backend.Stack,
@@ -144,8 +151,11 @@ func getStackConfigurationFromProjectStack(
 	sm secrets.Manager,
 	workspaceStack *workspace.ProjectStack,
 	envOverrides []string,
+	configIsLocal bool,
 ) (backend.StackConfiguration, error) {
-	env, diags, managedEnv, err := openStackEnvWithManaged(ctx, stack, workspaceStack, envOverrides)
+	// This is a non-command helper; we don't have a *cobra.Command writer to thread through here.
+	env, diags, managedEnv, err := openStackEnvWithManaged(
+		ctx, os.Stderr, stack, workspaceStack, envOverrides, configIsLocal) //nolint:forbidigo
 	if err != nil {
 		return backend.StackConfiguration{}, fmt.Errorf("opening environment: %w", err)
 	}
@@ -198,6 +208,7 @@ func getStackConfigurationFromProjectStack(
 			Decrypter:                config.NewPanicCrypter(),
 			ManagedEnvironment:       managedRevision,
 			ManagedEnvironmentNotice: managedNotice,
+			DeliveryEnvironment:      stack.ConfigLocation().DeliveryEnvironment,
 		}, nil
 	}
 
@@ -210,6 +221,7 @@ func getStackConfigurationFromProjectStack(
 		Decrypter:                crypter,
 		ManagedEnvironment:       managedRevision,
 		ManagedEnvironmentNotice: managedNotice,
+		DeliveryEnvironment:      stack.ConfigLocation().DeliveryEnvironment,
 	}, nil
 }
 
@@ -287,11 +299,184 @@ func openStackEnv(
 	workspaceStack *workspace.ProjectStack,
 	envOverrides []string,
 ) (*esc.Environment, []apitype.EnvironmentDiagnostic, error) {
-	env, diags, _, err := openStackEnvWithManaged(ctx, stack, workspaceStack, envOverrides)
+	env, diags, _, err := openStackEnvWithManaged(
+		ctx, os.Stderr, stack, workspaceStack, envOverrides, true) //nolint:forbidigo
 	return env, diags, err
 }
 
 func openStackEnvWithManaged(
+	ctx context.Context,
+	w io.Writer,
+	stack backend.Stack,
+	workspaceStack *workspace.ProjectStack,
+	envOverrides []string,
+	configIsLocal bool,
+) (*esc.Environment, []apitype.EnvironmentDiagnostic, *managedEnvironment, error) {
+	env, diags, managedEnv, err := openOwnStackEnv(ctx, stack, workspaceStack, envOverrides)
+	if err != nil || len(diags) != 0 {
+		return nil, diags, nil, err
+	}
+	env, diags, err = composeDeliveryEnvironment(ctx, w, stack, workspaceStack, env, configIsLocal)
+	if err != nil || len(diags) != 0 {
+		return nil, diags, nil, err
+	}
+	return env, nil, managedEnv, nil
+}
+
+// composeDeliveryEnvironment adds the pulumiConfig of the stack's Pulumi Delivery revision, if it has one, to env, and
+// writes its notices to w. It warns about the keys the stack's own config overrides only when configIsLocal.
+func composeDeliveryEnvironment(
+	ctx context.Context,
+	w io.Writer,
+	stack backend.Stack,
+	workspaceStack *workspace.ProjectStack,
+	env *esc.Environment,
+	configIsLocal bool,
+) (*esc.Environment, []apitype.EnvironmentDiagnostic, error) {
+	slot := stack.ConfigLocation().DeliveryEnvironment
+	if slot == nil {
+		return env, nil, nil
+	}
+
+	envs, ok := stack.Backend().(backend.EnvironmentsBackend)
+	if !ok {
+		return nil, nil, errBackendNoEnvironments(stack.Backend())
+	}
+	orgNamer, ok := stack.(interface{ OrgName() string })
+	if !ok {
+		return nil, nil, fmt.Errorf("cannot determine organization for stack %v", stack.Ref())
+	}
+	project, name, ok := strings.Cut(slot.Environment, "/")
+	if !ok {
+		return nil, nil, fmt.Errorf(
+			"stack %v has an invalid Pulumi Delivery environment %q", stack.Ref(), slot.Environment)
+	}
+
+	slotEnv, diags, err := envs.OpenEnvironmentRevision(
+		ctx, orgNamer.OrgName(), project, name, slot.Revision, 2*time.Hour)
+	if err != nil {
+		return nil, nil, fmt.Errorf("opening the config Pulumi Delivery holds for stack %v: %w", stack.Ref(), err)
+	}
+	if len(diags) != 0 {
+		return nil, diags, nil
+	}
+
+	slotConfig, _ := slotEnv.Properties["pulumiConfig"].Value.(map[string]esc.Value)
+	if len(slotConfig) == 0 {
+		return env, nil, nil
+	}
+
+	var envConfig map[string]esc.Value
+	if env != nil {
+		envConfig, _ = env.Properties["pulumiConfig"].Value.(map[string]esc.Value)
+	}
+	managed := stack.ConfigLocation().ManagedEnvironment != ""
+	merged, both, err := mergeDeliveryConfig(stack, slotConfig, envConfig, managed, workspaceStack.Config)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if !configIsLocal {
+		// Config copied from the latest update holds the values Delivery gave that update.
+		both = nil
+	}
+	printDeliveryNotices(w, slotEnv, slot, both)
+
+	if env == nil {
+		env = &esc.Environment{}
+	}
+	if env.Properties == nil {
+		env.Properties = map[string]esc.Value{}
+	}
+	env.Properties["pulumiConfig"] = esc.NewValue(merged)
+	return env, nil, nil
+}
+
+// mergeDeliveryConfig merges Delivery's config into the stack's environment config, leaving out the keys that the
+// stack's own config sets: its file, or the environment itself when envIsOwn. It returns the merged config and those
+// keys.
+func mergeDeliveryConfig(
+	stack backend.Stack,
+	slotConfig map[string]esc.Value,
+	envConfig map[string]esc.Value,
+	envIsOwn bool,
+	fileConfig config.Map,
+) (map[string]esc.Value, []config.Key, error) {
+	project, _ := stack.Ref().Project()
+	qualify := func(rawKey string) (config.Key, error) {
+		return ParseConfigKeyForProject(tokens.PackageName(project), rawKey, false)
+	}
+
+	merged := maps.Clone(envConfig)
+	if merged == nil {
+		merged = make(map[string]esc.Value, len(slotConfig))
+	}
+	envRawKeys := make(map[config.Key]string, len(envConfig))
+	for rawKey := range envConfig {
+		// A key that doesn't parse fails the update when it is merged, with a better error than this one could give.
+		if key, err := qualify(rawKey); err == nil {
+			envRawKeys[key] = rawKey
+		}
+	}
+
+	var both []config.Key
+	for rawKey, value := range slotConfig {
+		key, err := qualify(rawKey)
+		if err != nil {
+			return nil, nil, fmt.Errorf(
+				"stack %v: Pulumi Delivery holds an invalid config key %q: %w", stack.Ref(), rawKey, err)
+		}
+		envRawKey, inEnv := envRawKeys[key]
+		if _, inFile := fileConfig[key]; inFile || (inEnv && envIsOwn) {
+			both = append(both, key)
+			continue
+		}
+		if inEnv {
+			// The environment may spell the key bare, so remove its spelling rather than letting both race.
+			delete(merged, envRawKey)
+		}
+		merged[rawKey] = value
+	}
+	slices.SortFunc(both, func(a, b config.Key) int { return strings.Compare(a.String(), b.String()) })
+	return merged, both, nil
+}
+
+// printDeliveryNotices says which revision the run composed, and warns about each key of the stack's own config that
+// Delivery also sets.
+func printDeliveryNotices(
+	w io.Writer,
+	slotEnv *esc.Environment,
+	slot *apitype.StackDeliveryEnvironment,
+	both []config.Key,
+) {
+	source := "Pulumi Delivery"
+	if pipeline := deliveryPipeline(slotEnv); pipeline != "" {
+		source = "Pulumi Delivery (pipeline " + pipeline + ")"
+	}
+	fmt.Fprintf(w, "using config from %s, revision %d\n", source, slot.Revision)
+	if len(both) == 0 {
+		return
+	}
+
+	keys := make([]string, len(both))
+	for i, key := range both {
+		keys[i] = key.String()
+	}
+	message := fmt.Sprintf("this stack sets config that %s also sets: %s. The stack's values are used, in Delivery "+
+		"runs too. Remove these keys from the stack's config to use the pipeline's values.",
+		source, strings.Join(keys, ", "))
+	color := cmdutil.GetGlobalColorization()
+	fmt.Fprintln(w, color.Colorize(colors.SpecWarning+"warning: "+message+colors.Reset))
+}
+
+// deliveryPipeline returns the pipeline that the environment's revision says it came from, if it says.
+func deliveryPipeline(slotEnv *esc.Environment) string {
+	provenance, _ := slotEnv.Properties["delivery"].Value.(map[string]esc.Value)
+	pipeline, _ := provenance["pipeline"].Value.(string)
+	return pipeline
+}
+
+func openOwnStackEnv(
 	ctx context.Context,
 	stack backend.Stack,
 	workspaceStack *workspace.ProjectStack,
