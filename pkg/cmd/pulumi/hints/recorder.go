@@ -14,21 +14,16 @@
 
 package hints
 
-import (
-	"github.com/pulumi/pulumi/pkg/v3/resource/plugin"
-	"github.com/pulumi/pulumi/sdk/v3/go/common/tokens"
-)
+import "github.com/pulumi/pulumi/pkg/v3/resource/plugin"
 
 // Recorder returns the recorder that turns the hints providers report for their failures, such as dynamic
 // credentials, into this process's hints. Commands set it as the HintRecorder of the plugin contexts they create.
 func Recorder() plugin.HintRecorder { return defaultManager }
 
-// RecordHint implements plugin.HintRecorder. It offers the CLI hint for a hint that a provider sent.
-func (m *manager) RecordHint(pkg tokens.Package, hint plugin.Hint) {
-	if hint != plugin.HintDynamicCredentials {
+// RecordHint implements plugin.HintRecorder. It offers the hint a provider sent, with the provider's message.
+func (m *manager) RecordHint(hint plugin.Hint, message string) {
+	if hint != plugin.HintDynamicCredentials || message == "" {
 		return
 	}
-	if h, ok := escCredentials[pkg]; ok {
-		m.offer(h)
-	}
+	m.offer(ESCCredentials(message))
 }

@@ -39,8 +39,8 @@ const (
 
 // `Hint` names a product hint that is relevant to a failure a provider reports, either in a
 // [](pulumirpc.CheckFailure) or in a [](pulumirpc.HintDetail) attached to an error. A product hint points the user to a
-// Pulumi feature that helps with this kind of failure. The provider says which hint is relevant, and the engine decides
-// whether to show it and what it says.
+// Pulumi feature that helps with this kind of failure. The provider says which hint is relevant and what it says, and
+// the engine decides whether to show it.
 type Hint int32
 
 const (
@@ -1677,7 +1677,9 @@ type CheckFailure struct {
 	// The reason that the named property failed validation.
 	Reason string `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
 	// A product hint that is relevant to this failure, if any. The engine may show it to the user.
-	Hint          Hint `protobuf:"varint,3,opt,name=hint,proto3,enum=pulumirpc.Hint" json:"hint,omitempty"`
+	Hint Hint `protobuf:"varint,3,opt,name=hint,proto3,enum=pulumirpc.Hint" json:"hint,omitempty"`
+	// The text of the product hint in `hint`. The engine shows it if it decides to show the hint.
+	HintMessage   string `protobuf:"bytes,4,opt,name=hint_message,json=hintMessage,proto3" json:"hint_message,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1733,12 +1735,21 @@ func (x *CheckFailure) GetHint() Hint {
 	return Hint_HINT_UNSPECIFIED
 }
 
+func (x *CheckFailure) GetHintMessage() string {
+	if x != nil {
+		return x.HintMessage
+	}
+	return ""
+}
+
 // `HintDetail` is a type of error detail that a provider may attach to an error it returns from any call, such as
 // [](pulumirpc.ResourceProvider.Configure), to say which product hint is relevant to the failure.
 type HintDetail struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The product hint.
-	Hint          Hint `protobuf:"varint,1,opt,name=hint,proto3,enum=pulumirpc.Hint" json:"hint,omitempty"`
+	Hint Hint `protobuf:"varint,1,opt,name=hint,proto3,enum=pulumirpc.Hint" json:"hint,omitempty"`
+	// The text of the product hint. The engine shows it if it decides to show the hint.
+	Message       string `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1778,6 +1789,13 @@ func (x *HintDetail) GetHint() Hint {
 		return x.Hint
 	}
 	return Hint_HINT_UNSPECIFIED
+}
+
+func (x *HintDetail) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
 }
 
 // `DiffRequest` is the type of requests sent as part of [](pulumirpc.ResourceProvider.DiffConfig) and
@@ -4686,14 +4704,16 @@ const file_pulumi_provider_proto_rawDesc = "" +
 	"\aDISABLE\x10\x02J\x04\b\x04\x10\x05R\x0esequenceNumber\"u\n" +
 	"\rCheckResponse\x12/\n" +
 	"\x06inputs\x18\x01 \x01(\v2\x17.google.protobuf.StructR\x06inputs\x123\n" +
-	"\bfailures\x18\x02 \x03(\v2\x17.pulumirpc.CheckFailureR\bfailures\"g\n" +
+	"\bfailures\x18\x02 \x03(\v2\x17.pulumirpc.CheckFailureR\bfailures\"\x8a\x01\n" +
 	"\fCheckFailure\x12\x1a\n" +
 	"\bproperty\x18\x01 \x01(\tR\bproperty\x12\x16\n" +
 	"\x06reason\x18\x02 \x01(\tR\x06reason\x12#\n" +
-	"\x04hint\x18\x03 \x01(\x0e2\x0f.pulumirpc.HintR\x04hint\"1\n" +
+	"\x04hint\x18\x03 \x01(\x0e2\x0f.pulumirpc.HintR\x04hint\x12!\n" +
+	"\fhint_message\x18\x04 \x01(\tR\vhintMessage\"K\n" +
 	"\n" +
 	"HintDetail\x12#\n" +
-	"\x04hint\x18\x01 \x01(\x0e2\x0f.pulumirpc.HintR\x04hint\"\x8f\x02\n" +
+	"\x04hint\x18\x01 \x01(\x0e2\x0f.pulumirpc.HintR\x04hint\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"\x8f\x02\n" +
 	"\vDiffRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x10\n" +
 	"\x03urn\x18\x02 \x01(\tR\x03urn\x12+\n" +

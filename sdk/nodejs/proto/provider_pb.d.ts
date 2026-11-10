@@ -755,6 +755,8 @@ export class CheckFailure extends jspb.Message {
     setReason(value: string): CheckFailure;
     getHint(): Hint;
     setHint(value: Hint): CheckFailure;
+    getHintMessage(): string;
+    setHintMessage(value: string): CheckFailure;
 
     serializeBinary(): Uint8Array;
     toObject(includeInstance?: boolean): CheckFailure.AsObject;
@@ -771,12 +773,15 @@ export namespace CheckFailure {
         property: string,
         reason: string,
         hint: Hint,
+        hintMessage: string,
     }
 }
 
 export class HintDetail extends jspb.Message { 
     getHint(): Hint;
     setHint(value: Hint): HintDetail;
+    getMessage(): string;
+    setMessage(value: string): HintDetail;
 
     serializeBinary(): Uint8Array;
     toObject(includeInstance?: boolean): HintDetail.AsObject;
@@ -791,6 +796,7 @@ export class HintDetail extends jspb.Message {
 export namespace HintDetail {
     export type AsObject = {
         hint: Hint,
+        message: string,
     }
 }
 

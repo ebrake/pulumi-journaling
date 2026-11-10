@@ -608,9 +608,10 @@ type GrpcProvider interface {
 
 // CheckFailure indicates that a call to check failed; it contains the property and reason for the failure.
 type CheckFailure struct {
-	Property resource.PropertyKey // the property that failed checking.
-	Reason   string               // the reason the property failed to check.
-	Hint     Hint                 // a product hint relevant to the failure, if any.
+	Property    resource.PropertyKey // the property that failed checking.
+	Reason      string               // the reason the property failed to check.
+	Hint        Hint                 // a product hint relevant to the failure, if any.
+	HintMessage string               // the text of the hint, which the engine shows if it decides to show the hint.
 }
 
 // ErrNotYetImplemented may be returned from a provider for optional methods that are not yet implemented.

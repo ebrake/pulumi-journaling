@@ -718,12 +718,15 @@ message CheckFailure {
 
     // A product hint that is relevant to this failure, if any. The engine may show it to the user.
     Hint hint = 3;
+
+    // The text of the product hint in `hint`. The engine shows it if it decides to show the hint.
+    string hint_message = 4;
 }
 
 // `Hint` names a product hint that is relevant to a failure a provider reports, either in a
 // [](pulumirpc.CheckFailure) or in a [](pulumirpc.HintDetail) attached to an error. A product hint points the user to a
-// Pulumi feature that helps with this kind of failure. The provider says which hint is relevant, and the engine decides
-// whether to show it and what it says.
+// Pulumi feature that helps with this kind of failure. The provider says which hint is relevant and what it says, and
+// the engine decides whether to show it.
 enum Hint {
     // No product hint is relevant.
     HINT_UNSPECIFIED = 0;
@@ -738,6 +741,9 @@ enum Hint {
 message HintDetail {
     // The product hint.
     Hint hint = 1;
+
+    // The text of the product hint. The engine shows it if it decides to show the hint.
+    string message = 2;
 }
 
 // `DiffRequest` is the type of requests sent as part of [](pulumirpc.ResourceProvider.DiffConfig) and

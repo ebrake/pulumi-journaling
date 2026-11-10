@@ -50,8 +50,8 @@ class _HintEnumTypeWrapper(google.protobuf.internal.enum_type_wrapper._EnumTypeW
 class Hint(_Hint, metaclass=_HintEnumTypeWrapper):
     """`Hint` names a product hint that is relevant to a failure a provider reports, either in a
     [](pulumirpc.CheckFailure) or in a [](pulumirpc.HintDetail) attached to an error. A product hint points the user to a
-    Pulumi feature that helps with this kind of failure. The provider says which hint is relevant, and the engine decides
-    whether to show it and what it says.
+    Pulumi feature that helps with this kind of failure. The provider says which hint is relevant and what it says, and
+    the engine decides whether to show it.
     """
 
 HINT_UNSPECIFIED: Hint.ValueType  # 0
@@ -1053,20 +1053,24 @@ class CheckFailure(google.protobuf.message.Message):
     PROPERTY_FIELD_NUMBER: builtins.int
     REASON_FIELD_NUMBER: builtins.int
     HINT_FIELD_NUMBER: builtins.int
+    HINT_MESSAGE_FIELD_NUMBER: builtins.int
     property: builtins.str
     """The input property that failed validation."""
     reason: builtins.str
     """The reason that the named property failed validation."""
     hint: global___Hint.ValueType
     """A product hint that is relevant to this failure, if any. The engine may show it to the user."""
+    hint_message: builtins.str
+    """The text of the product hint in `hint`. The engine shows it if it decides to show the hint."""
     def __init__(
         self,
         *,
         property: builtins.str = ...,
         reason: builtins.str = ...,
         hint: global___Hint.ValueType = ...,
+        hint_message: builtins.str = ...,
     ) -> None: ...
-    def ClearField(self, field_name: typing.Literal["hint", b"hint", "property", b"property", "reason", b"reason"]) -> None: ...
+    def ClearField(self, field_name: typing.Literal["hint", b"hint", "hint_message", b"hint_message", "property", b"property", "reason", b"reason"]) -> None: ...
 
 global___CheckFailure = CheckFailure
 
@@ -1079,14 +1083,18 @@ class HintDetail(google.protobuf.message.Message):
     DESCRIPTOR: google.protobuf.descriptor.Descriptor
 
     HINT_FIELD_NUMBER: builtins.int
+    MESSAGE_FIELD_NUMBER: builtins.int
     hint: global___Hint.ValueType
     """The product hint."""
+    message: builtins.str
+    """The text of the product hint. The engine shows it if it decides to show the hint."""
     def __init__(
         self,
         *,
         hint: global___Hint.ValueType = ...,
+        message: builtins.str = ...,
     ) -> None: ...
-    def ClearField(self, field_name: typing.Literal["hint", b"hint"]) -> None: ...
+    def ClearField(self, field_name: typing.Literal["hint", b"hint", "message", b"message"]) -> None: ...
 
 global___HintDetail = HintDetail
 

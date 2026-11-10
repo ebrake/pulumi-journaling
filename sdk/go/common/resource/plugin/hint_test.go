@@ -29,7 +29,9 @@ func TestProviderServerSendsCheckFailureHint(t *testing.T) {
 
 	server := NewProviderServer(&MockProvider{
 		CheckConfigF: func(context.Context, CheckConfigRequest) (CheckConfigResponse, error) {
-			return CheckConfigResponse{Failures: []CheckFailure{{Reason: "no credentials", Hint: HintDynamicCredentials}}}, nil
+			return CheckConfigResponse{Failures: []CheckFailure{
+				{Reason: "no credentials", Hint: HintDynamicCredentials, HintMessage: "use ESC"},
+			}}, nil
 		},
 	})
 	resp, err := server.CheckConfig(t.Context(), &pulumirpc.CheckRequest{
@@ -38,6 +40,7 @@ func TestProviderServerSendsCheckFailureHint(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, resp.GetFailures(), 1)
 	assert.Equal(t, pulumirpc.Hint_HINT_DYNAMIC_CREDENTIALS, resp.GetFailures()[0].GetHint())
+	assert.Equal(t, "use ESC", resp.GetFailures()[0].GetHintMessage())
 }
 
 func TestHintRoundTrip(t *testing.T) {

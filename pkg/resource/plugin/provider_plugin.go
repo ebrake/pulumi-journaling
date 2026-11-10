@@ -746,7 +746,7 @@ func (p *provider) CheckConfig(ctx context.Context, req CheckConfigRequest) (Che
 		}
 		logging.V(8).Infof("%s provider received rpc error `%s`: `%s`", label, rpcError.Code(),
 			rpcError.Message())
-		p.recordHint(req.URN.Type(), HintOf(err))
+		p.recordHint(HintOf(err))
 		return CheckConfigResponse{}, err
 	}
 
@@ -771,7 +771,7 @@ func (p *provider) CheckConfig(ctx context.Context, req CheckConfigRequest) (Che
 	// And now any properties that failed verification.
 	failures := checkFailuresFromRPC(resp.GetFailures())
 	for _, failure := range failures {
-		p.recordHint(req.URN.Type(), failure.Hint)
+		p.recordHint(failure.Hint, failure.HintMessage)
 	}
 
 	// Copy over any secret annotations, since we could not pass any to the provider, and return.
@@ -1149,7 +1149,7 @@ func (p *provider) Configure(ctx context.Context, req ConfigureRequest) (Configu
 	if err != nil {
 		rpcError := rpcerror.Convert(err)
 		logging.V(7).Infof("%s failed: err=%v", label, rpcError.Message())
-		p.recordHint(*req.Type, HintOf(err))
+		p.recordHint(HintOf(err))
 		err = createConfigureError(rpcError)
 		p.configSource.MustReject(err)
 		return ConfigureResponse{}, err
@@ -1485,7 +1485,7 @@ func (p *provider) Create(ctx context.Context, req CreateRequest) (CreateRespons
 		ResourceStatusToken:   req.ResourceStatusToken,
 	})
 	if err != nil {
-		p.recordHint(req.URN.Type(), HintOf(err))
+		p.recordHint(HintOf(err))
 		resourceStatus, id, liveObject, _, refreshBeforeUpdate, resourceError = parseError(err)
 		logging.V(7).Infof("%s failed: %v", label, resourceError)
 
@@ -1619,7 +1619,7 @@ func (p *provider) Read(ctx context.Context, req ReadRequest) (ReadResponse, err
 		OldViews:              oldViews,
 	})
 	if err != nil {
-		p.recordHint(req.URN.Type(), HintOf(err))
+		p.recordHint(HintOf(err))
 		resourceStatus, readID, liveObject, liveInputs, refreshBeforeUpdate, resourceError = parseError(err)
 		logging.V(7).Infof("%s failed: %v", label, err)
 
@@ -1816,7 +1816,7 @@ func (p *provider) Update(ctx context.Context, req UpdateRequest) (UpdateRespons
 		OldViews:              oldViews,
 	})
 	if err != nil {
-		p.recordHint(req.URN.Type(), HintOf(err))
+		p.recordHint(HintOf(err))
 		resourceStatus, _, liveObject, _, refreshBeforeUpdate, resourceError = parseError(err)
 		logging.V(7).Infof("%s failed: %v", label, resourceError)
 
@@ -2810,9 +2810,10 @@ func checkFailuresFromRPC(rpcFailures []*pulumirpc.CheckFailure) []CheckFailure 
 	failures := slice.Prealloc[CheckFailure](len(rpcFailures))
 	for _, f := range rpcFailures {
 		failures = append(failures, CheckFailure{
-			Property: resource.PropertyKey(f.GetProperty()),
-			Reason:   f.GetReason(),
-			Hint:     hintFromRPC(f.GetHint()),
+			Property:    resource.PropertyKey(f.GetProperty()),
+			Reason:      f.GetReason(),
+			Hint:        hintFromRPC(f.GetHint()),
+			HintMessage: f.GetHintMessage(),
 		})
 	}
 	return failures

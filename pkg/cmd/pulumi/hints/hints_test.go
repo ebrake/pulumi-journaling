@@ -25,7 +25,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pulumi/pulumi/pkg/v3/resource/plugin"
-	"github.com/pulumi/pulumi/sdk/v3/go/common/tokens"
 	"github.com/pulumi/pulumi/sdk/v3/go/common/workspace"
 )
 
@@ -227,27 +226,18 @@ func TestLoadSettings(t *testing.T) {
 func TestESCHintOnCredentialsFailure(t *testing.T) {
 	t.Parallel()
 
+	const message = "Run `pulumi env setup aws`."
 	tests := []struct {
 		name    string
-		record  map[tokens.Package]plugin.Hint
+		hint    plugin.Hint
+		message string
 		isCloud bool
-		want    string
+		want    bool
 	}{
-		{
-			"aws on cloud",
-			map[tokens.Package]plugin.Hint{"aws": plugin.HintDynamicCredentials},
-			true,
-			"`pulumi env setup aws`",
-		},
-		{
-			"azure-native on cloud",
-			map[tokens.Package]plugin.Hint{"azure-native": plugin.HintDynamicCredentials},
-			true,
-			"`pulumi env setup azure`",
-		},
-		{"aws on diy", map[tokens.Package]plugin.Hint{"aws": plugin.HintDynamicCredentials}, false, ""},
-		{"unsupported package", map[tokens.Package]plugin.Hint{"random": plugin.HintDynamicCredentials}, true, ""},
-		{"unspecified hint", map[tokens.Package]plugin.Hint{"aws": plugin.HintUnspecified}, true, ""},
+		{"dynamic credentials on cloud", plugin.HintDynamicCredentials, message, true, true},
+		{"dynamic credentials on diy", plugin.HintDynamicCredentials, message, false, false},
+		{"no message", plugin.HintDynamicCredentials, "", true, false},
+		{"unspecified hint", plugin.HintUnspecified, message, true, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -255,14 +245,12 @@ func TestESCHintOnCredentialsFailure(t *testing.T) {
 			tm := newTestManager(t)
 			tm.recordSuccessfulUpdate()
 			tm.local = !tt.isCloud
-			for pkg, hint := range tt.record {
-				tm.RecordHint(pkg, hint)
-			}
+			tm.RecordHint(tt.hint, tt.message)
 			out := tm.run()
-			if tt.want == "" {
-				assert.Empty(t, out)
+			if tt.want {
+				assert.Contains(t, out, message)
 			} else {
-				assert.Contains(t, out, tt.want)
+				assert.Empty(t, out)
 			}
 		})
 	}

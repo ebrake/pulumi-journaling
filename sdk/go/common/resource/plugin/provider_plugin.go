@@ -2690,9 +2690,10 @@ func checkFailuresFromRPC(rpcFailures []*pulumirpc.CheckFailure) []CheckFailure 
 	failures := slice.Prealloc[CheckFailure](len(rpcFailures))
 	for _, f := range rpcFailures {
 		failures = append(failures, CheckFailure{
-			Property: resource.PropertyKey(f.GetProperty()),
-			Reason:   f.GetReason(),
-			Hint:     hintFromRPC(f.GetHint()),
+			Property:    resource.PropertyKey(f.GetProperty()),
+			Reason:      f.GetReason(),
+			Hint:        hintFromRPC(f.GetHint()),
+			HintMessage: f.GetHintMessage(),
 		})
 	}
 	return failures

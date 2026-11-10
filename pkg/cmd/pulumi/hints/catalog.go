@@ -14,12 +14,7 @@
 
 package hints
 
-import (
-	"fmt"
-	"time"
-
-	"github.com/pulumi/pulumi/sdk/v3/go/common/tokens"
-)
+import "time"
 
 // AgentSkills suggests Pulumi's agent skills to AI coding agents that create a new project.
 var AgentSkills = Hint{
@@ -40,22 +35,13 @@ var DriftDetection = Hint{
 	CloudOnly: true,
 }
 
-// escCredentials holds, for each provider package that Pulumi ESC can supply OIDC credentials for, the hint that
-// suggests ESC when the provider says dynamic credentials may help with a failure.
-var escCredentials = map[tokens.Package]Hint{
-	"aws":          escCredentialsHint("AWS", "aws"),
-	"azure":        escCredentialsHint("Azure", "azure"),
-	"azure-native": escCredentialsHint("Azure", "azure"),
-	"gcp":          escCredentialsHint("Google Cloud", "gcp"),
-}
-
-func escCredentialsHint(cloudName, setupName string) Hint {
+// ESCCredentials suggests Pulumi ESC after a provider says that dynamic credentials may help with a failure. The
+// provider writes the message, because it knows its cloud and how to set up ESC for it.
+func ESCCredentials(message string) Hint {
 	return Hint{
-		ID:       "esc-credentials",
-		Cooldown: 24 * time.Hour,
-		Message: fmt.Sprintf("Pulumi ESC can give your stacks short-lived %s credentials through OIDC. "+
-			"To set it up, run `pulumi env setup %s`. "+
-			"Learn more: https://www.pulumi.com/docs/esc/guides/configuring-oidc/", cloudName, setupName),
+		ID:        "esc-credentials",
+		Cooldown:  24 * time.Hour,
+		Message:   message,
 		CloudOnly: true,
 	}
 }

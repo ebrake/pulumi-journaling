@@ -32,40 +32,45 @@ import (
 	pulumirpc "github.com/pulumi/pulumi/sdk/v3/proto/go"
 )
 
-type testRecorder struct {
-	mu   sync.Mutex
-	seen map[tokens.Package]Hint
+type recordedHint struct {
+	hint    Hint
+	message string
 }
 
-func (r *testRecorder) RecordHint(pkg tokens.Package, hint Hint) {
+type testRecorder struct {
+	mu   sync.Mutex
+	seen []recordedHint
+}
+
+func (r *testRecorder) RecordHint(hint Hint, message string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.seen == nil {
-		r.seen = map[tokens.Package]Hint{}
-	}
-	r.seen[pkg] = hint
+	r.seen = append(r.seen, recordedHint{hint, message})
 }
+
+var escHint = recordedHint{HintDynamicCredentials, "use ESC"}
 
 func TestHintOf(t *testing.T) {
 	t.Parallel()
 
-	credsErr := WithHint(rpcerror.New(codes.Unauthenticated, "expired token"), HintDynamicCredentials)
+	credsErr := WithHint(rpcerror.New(codes.Unauthenticated, "expired token"), HintDynamicCredentials, "use ESC")
 
 	tests := []struct {
 		name string
 		err  error
-		want Hint
+		want recordedHint
 	}{
-		{"nil", nil, HintUnspecified},
-		{"plain error", errors.New("boom"), HintUnspecified},
-		{"status without detail", rpcerror.New(codes.Unauthenticated, "boom"), HintUnspecified},
-		{"status with detail", credsErr, HintDynamicCredentials},
-		{"converted and wrapped", fmt.Errorf("configure: %w", rpcerror.Convert(credsErr)), HintDynamicCredentials},
+		{"nil", nil, recordedHint{}},
+		{"plain error", errors.New("boom"), recordedHint{}},
+		{"status without detail", rpcerror.New(codes.Unauthenticated, "boom"), recordedHint{}},
+		{"status with detail", credsErr, escHint},
+		{"converted and wrapped", fmt.Errorf("configure: %w", rpcerror.Convert(credsErr)), escHint},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			assert.Equal(t, tt.want, HintOf(tt.err))
+			hint, message := HintOf(tt.err)
+			assert.Equal(t, tt.want, recordedHint{hint, message})
 		})
 	}
 }
@@ -84,7 +89,7 @@ func TestProviderRecordsCheckConfigFailureHint(t *testing.T) {
 		CheckConfigF: func(*pulumirpc.CheckRequest) (*pulumirpc.CheckResponse, error) {
 			return &pulumirpc.CheckResponse{Failures: []*pulumirpc.CheckFailure{
 				{Reason: "unrelated"},
-				{Reason: "no credentials", Hint: pulumirpc.Hint_HINT_DYNAMIC_CREDENTIALS},
+				{Reason: "no credentials", Hint: pulumirpc.Hint_HINT_DYNAMIC_CREDENTIALS, HintMessage: "use ESC"},
 			}}, nil
 		},
 	}
@@ -99,7 +104,8 @@ func TestProviderRecordsCheckConfigFailureHint(t *testing.T) {
 	require.Len(t, resp.Failures, 2)
 	assert.Equal(t, HintUnspecified, resp.Failures[0].Hint)
 	assert.Equal(t, HintDynamicCredentials, resp.Failures[1].Hint)
-	assert.Equal(t, map[tokens.Package]Hint{"aws": HintDynamicCredentials}, rec.seen)
+	assert.Equal(t, "use ESC", resp.Failures[1].HintMessage)
+	assert.Equal(t, []recordedHint{escHint}, rec.seen)
 }
 
 func TestProviderRecordsConfigureErrorHint(t *testing.T) {
@@ -107,7 +113,7 @@ func TestProviderRecordsConfigureErrorHint(t *testing.T) {
 
 	client := &stubClient{
 		ConfigureF: func(*pulumirpc.ConfigureRequest) (*pulumirpc.ConfigureResponse, error) {
-			return nil, WithHint(rpcerror.New(codes.Unauthenticated, "expired token"), HintDynamicCredentials)
+			return nil, WithHint(rpcerror.New(codes.Unauthenticated, "expired token"), HintDynamicCredentials, "use ESC")
 		},
 	}
 	rec := &testRecorder{}
@@ -115,8 +121,7 @@ func TestProviderRecordsConfigureErrorHint(t *testing.T) {
 
 	_, err := p.Configure(t.Context(), ConfigureRequest{Type: new(tokens.Type("pulumi:providers:gcp"))})
 	require.ErrorContains(t, err, "expired token")
-	assert.Equal(t, HintDynamicCredentials, HintOf(err))
-	assert.Equal(t, map[tokens.Package]Hint{"gcp": HintDynamicCredentials}, rec.seen)
+	assert.Equal(t, []recordedHint{escHint}, rec.seen)
 }
 
 func TestProviderRecordsCreateErrorHint(t *testing.T) {
@@ -127,7 +132,7 @@ func TestProviderRecordsCreateErrorHint(t *testing.T) {
 			return &pulumirpc.ConfigureResponse{}, nil
 		},
 		CreateF: func(*pulumirpc.CreateRequest) (*pulumirpc.CreateResponse, error) {
-			return nil, WithHint(rpcerror.New(codes.Unauthenticated, "expired token"), HintDynamicCredentials)
+			return nil, WithHint(rpcerror.New(codes.Unauthenticated, "expired token"), HintDynamicCredentials, "use ESC")
 		},
 	}
 	rec := &testRecorder{}
@@ -140,7 +145,7 @@ func TestProviderRecordsCreateErrorHint(t *testing.T) {
 		Properties: property.Map{},
 	})
 	require.ErrorContains(t, err, "expired token")
-	assert.Equal(t, map[tokens.Package]Hint{"aws": HintDynamicCredentials}, rec.seen)
+	assert.Equal(t, []recordedHint{escHint}, rec.seen)
 }
 
 func TestProviderServerSendsCheckFailureHint(t *testing.T) {
@@ -148,7 +153,9 @@ func TestProviderServerSendsCheckFailureHint(t *testing.T) {
 
 	server := NewProviderServer(&MockProvider{
 		CheckConfigF: func(context.Context, CheckConfigRequest) (CheckConfigResponse, error) {
-			return CheckConfigResponse{Failures: []CheckFailure{{Reason: "no credentials", Hint: HintDynamicCredentials}}}, nil
+			return CheckConfigResponse{Failures: []CheckFailure{
+				{Reason: "no credentials", Hint: HintDynamicCredentials, HintMessage: "use ESC"},
+			}}, nil
 		},
 	})
 	resp, err := server.CheckConfig(t.Context(), &pulumirpc.CheckRequest{
@@ -157,4 +164,5 @@ func TestProviderServerSendsCheckFailureHint(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, resp.GetFailures(), 1)
 	assert.Equal(t, pulumirpc.Hint_HINT_DYNAMIC_CREDENTIALS, resp.GetFailures()[0].GetHint())
+	assert.Equal(t, "use ESC", resp.GetFailures()[0].GetHintMessage())
 }

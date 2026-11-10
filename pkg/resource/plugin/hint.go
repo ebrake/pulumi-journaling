@@ -16,16 +16,13 @@ package plugin
 
 import (
 	"errors"
-	"strings"
 
-	"github.com/pulumi/pulumi/sdk/v3/go/common/providers"
-	"github.com/pulumi/pulumi/sdk/v3/go/common/tokens"
 	"github.com/pulumi/pulumi/sdk/v3/go/common/util/rpcutil/rpcerror"
 	pulumirpc "github.com/pulumi/pulumi/sdk/v3/proto/go"
 )
 
 // Hint names a product hint that is relevant to a failure a provider reports. The provider says which hint is
-// relevant, and the engine decides whether to show it.
+// relevant and what it says, and the engine decides whether to show it.
 type Hint int
 
 const (
@@ -59,52 +56,44 @@ func (h Hint) rpc() pulumirpc.Hint {
 	}
 }
 
-// HintOf returns the hint that a provider attached to err as a HintDetail. It returns HintUnspecified for errors
-// without such a detail.
-func HintOf(err error) Hint {
+// HintOf returns the hint and its message that a provider attached to err as a HintDetail. It returns
+// HintUnspecified for errors without such a detail.
+func HintOf(err error) (Hint, string) {
 	if err == nil {
-		return HintUnspecified
+		return HintUnspecified, ""
 	}
 	rpcErr, ok := rpcerror.FromError(err)
 	if !ok {
 		if rpcErr, ok = errors.AsType[*rpcerror.Error](err); !ok {
-			return HintUnspecified
+			return HintUnspecified, ""
 		}
 	}
 	for _, d := range rpcErr.Details() {
 		if detail, ok := d.(*pulumirpc.HintDetail); ok {
 			if hint := hintFromRPC(detail.GetHint()); hint != HintUnspecified {
-				return hint
+				return hint, detail.GetMessage()
 			}
 		}
 	}
-	return HintUnspecified
+	return HintUnspecified, ""
 }
 
-// WithHint attaches a HintDetail to err, which must be a gRPC status error such as one made by
-// [rpcerror.New].
-func WithHint(err error, hint Hint) error {
-	return rpcerror.WithDetails(err, &pulumirpc.HintDetail{Hint: hint.rpc()})
+// WithHint attaches a HintDetail with hint and its message to err, which must be a gRPC status error such as one
+// made by [rpcerror.New].
+func WithHint(err error, hint Hint, message string) error {
+	return rpcerror.WithDetails(err, &pulumirpc.HintDetail{Hint: hint.rpc(), Message: message})
 }
 
 // HintRecorder is told about each hint that a provider reports for a failure. Set it on [Context.HintRecorder].
 type HintRecorder interface {
-	RecordHint(pkg tokens.Package, hint Hint)
+	// RecordHint is told about hint and the message the provider sent for it.
+	RecordHint(hint Hint, message string)
 }
 
-// recordHint reports hint to the hint recorder of the provider's plugin context, if there is one, for the package of
-// typ. typ is a resource type such as aws:s3:Bucket or a provider type such as pulumi:providers:aws.
-func (p *provider) recordHint(typ tokens.Type, hint Hint) {
+// recordHint reports hint and its message to the hint recorder of the provider's plugin context, if there is one.
+func (p *provider) recordHint(hint Hint, message string) {
 	if hint == HintUnspecified || p.ctx == nil || p.ctx.HintRecorder == nil {
 		return
 	}
-	var pkg tokens.Package
-	if providers.IsProviderType(typ) {
-		pkg = providers.GetProviderPackage(typ)
-	} else {
-		// Avoid tokens.Type.Package, which asserts that the token is well formed.
-		name, _, _ := strings.Cut(string(typ), ":")
-		pkg = tokens.Package(name)
-	}
-	p.ctx.HintRecorder.RecordHint(pkg, hint)
+	p.ctx.HintRecorder.RecordHint(hint, message)
 }

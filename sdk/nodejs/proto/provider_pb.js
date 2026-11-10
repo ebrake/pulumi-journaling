@@ -6662,7 +6662,8 @@ proto.pulumirpc.CheckFailure.toObject = function(includeInstance, msg) {
   var f, obj = {
 property: jspb.Message.getFieldWithDefault(msg, 1, ""),
 reason: jspb.Message.getFieldWithDefault(msg, 2, ""),
-hint: jspb.Message.getFieldWithDefault(msg, 3, 0)
+hint: jspb.Message.getFieldWithDefault(msg, 3, 0),
+hintMessage: jspb.Message.getFieldWithDefault(msg, 4, "")
   };
 
   if (includeInstance) {
@@ -6711,6 +6712,10 @@ proto.pulumirpc.CheckFailure.deserializeBinaryFromReader = function(msg, reader)
       var value = /** @type {!proto.pulumirpc.Hint} */ (reader.readEnum());
       msg.setHint(value);
       break;
+    case 4:
+      var value = /** @type {string} */ (reader.readString());
+      msg.setHintMessage(value);
+      break;
     default:
       reader.skipField();
       break;
@@ -6758,6 +6763,13 @@ proto.pulumirpc.CheckFailure.serializeBinaryToWriter = function(message, writer)
   if (f !== 0.0) {
     writer.writeEnum(
       3,
+      f
+    );
+  }
+  f = message.getHintMessage();
+  if (f.length > 0) {
+    writer.writeString(
+      4,
       f
     );
   }
@@ -6818,6 +6830,24 @@ proto.pulumirpc.CheckFailure.prototype.setHint = function(value) {
 };
 
 
+/**
+ * optional string hint_message = 4;
+ * @return {string}
+ */
+proto.pulumirpc.CheckFailure.prototype.getHintMessage = function() {
+  return /** @type {string} */ (jspb.Message.getFieldWithDefault(this, 4, ""));
+};
+
+
+/**
+ * @param {string} value
+ * @return {!proto.pulumirpc.CheckFailure} returns this
+ */
+proto.pulumirpc.CheckFailure.prototype.setHintMessage = function(value) {
+  return jspb.Message.setProto3StringField(this, 4, value);
+};
+
+
 
 
 
@@ -6850,7 +6880,8 @@ proto.pulumirpc.HintDetail.prototype.toObject = function(opt_includeInstance) {
  */
 proto.pulumirpc.HintDetail.toObject = function(includeInstance, msg) {
   var f, obj = {
-hint: jspb.Message.getFieldWithDefault(msg, 1, 0)
+hint: jspb.Message.getFieldWithDefault(msg, 1, 0),
+message: jspb.Message.getFieldWithDefault(msg, 2, "")
   };
 
   if (includeInstance) {
@@ -6891,6 +6922,10 @@ proto.pulumirpc.HintDetail.deserializeBinaryFromReader = function(msg, reader) {
       var value = /** @type {!proto.pulumirpc.Hint} */ (reader.readEnum());
       msg.setHint(value);
       break;
+    case 2:
+      var value = /** @type {string} */ (reader.readString());
+      msg.setMessage(value);
+      break;
     default:
       reader.skipField();
       break;
@@ -6927,6 +6962,13 @@ proto.pulumirpc.HintDetail.serializeBinaryToWriter = function(message, writer) {
       f
     );
   }
+  f = message.getMessage();
+  if (f.length > 0) {
+    writer.writeString(
+      2,
+      f
+    );
+  }
 };
 
 
@@ -6945,6 +6987,24 @@ proto.pulumirpc.HintDetail.prototype.getHint = function() {
  */
 proto.pulumirpc.HintDetail.prototype.setHint = function(value) {
   return jspb.Message.setProto3EnumField(this, 1, value);
+};
+
+
+/**
+ * optional string message = 2;
+ * @return {string}
+ */
+proto.pulumirpc.HintDetail.prototype.getMessage = function() {
+  return /** @type {string} */ (jspb.Message.getFieldWithDefault(this, 2, ""));
+};
+
+
+/**
+ * @param {string} value
+ * @return {!proto.pulumirpc.HintDetail} returns this
+ */
+proto.pulumirpc.HintDetail.prototype.setMessage = function(value) {
+  return jspb.Message.setProto3StringField(this, 2, value);
 };
 
 

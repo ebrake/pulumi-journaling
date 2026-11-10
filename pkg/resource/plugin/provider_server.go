@@ -1320,7 +1320,12 @@ func unmarshalView(v *pulumirpc.View, opts FilterOptions) (View, error) {
 func checkFailuresToRPC(failures []CheckFailure) []*pulumirpc.CheckFailure {
 	rpcFailures := make([]*pulumirpc.CheckFailure, len(failures))
 	for i, f := range failures {
-		rpcFailures[i] = &pulumirpc.CheckFailure{Property: string(f.Property), Reason: f.Reason, Hint: f.Hint.rpc()}
+		rpcFailures[i] = &pulumirpc.CheckFailure{
+			Property:    string(f.Property),
+			Reason:      f.Reason,
+			Hint:        f.Hint.rpc(),
+			HintMessage: f.HintMessage,
+		}
 	}
 	return rpcFailures
 }

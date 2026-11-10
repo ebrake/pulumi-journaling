@@ -19,7 +19,7 @@ import (
 )
 
 // Hint names a product hint that is relevant to a failure a provider reports. The provider says which hint is
-// relevant, and the engine decides whether to show it.
+// relevant and what it says, and the engine decides whether to show it.
 type Hint int
 
 const (
