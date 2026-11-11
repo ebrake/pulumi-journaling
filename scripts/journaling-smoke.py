@@ -2,11 +2,11 @@
 """Exercise real CLI lifecycle and process-crash recovery without cloud providers.
 
 Run with --cli PATH --python PATH and optional --stock-cli PATH. The default
-backend is a private temporary file store. --backend gs://BUCKET/UNIQUE_PREFIX
-explicitly opts into GCS writes; the prefix must be dedicated to this test.
-No production stack is selected. Artifacts and a JSON result are written under
---output when supplied. The program creates only component resources. GCS
-objects in the dedicated prefix are retained for inspection after the test.
+backend is a private temporary file store. --backend URL explicitly opts into
+another storage backend; its prefix or database table must be dedicated to this
+test. No production stack is selected. Artifacts and a JSON result are written
+under --output when supplied. The program creates only component resources.
+Remote objects are retained for inspection after the test.
 """
 
 import argparse
@@ -79,8 +79,7 @@ def main():
                 cwd=working_dir or project,
                 env=env | (extra_env or {}),
                 text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
+                capture_output=True,
                 timeout=120,
             )
             log.append(
@@ -89,11 +88,12 @@ def main():
                     "seconds": time.monotonic() - start,
                     "returncode": completed.returncode,
                     "output": completed.stdout,
+                    "stderr": completed.stderr,
                 }
             )
             if expected != (completed.returncode == 0):
                 raise RuntimeError(
-                    f"Unexpected command result: {command}\n{completed.stdout}"
+                    f"Unexpected command result: {command}\n{completed.stdout}\n{completed.stderr}"
                 )
             return completed
 
@@ -192,7 +192,7 @@ def main():
                 expected=False,
                 binary=str(args.stock_cli.resolve()),
             )
-            assert "pulumiJournalingV1" in rejected.stdout
+            assert "pulumiJournalingV1" in rejected.stdout + rejected.stderr
         if args.automatic_recovery:
             run(
                 "refresh",

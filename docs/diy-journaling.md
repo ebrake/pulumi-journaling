@@ -32,7 +32,9 @@ checkpoint. Recovery accepts only the starting, guarded or prepared clean hash.
 GCS reads capture the object generation and writes enforce it with upload CRC32C
 validation. S3 and Azure capture ETags from the same read as the checkpoint bytes
 and require matching ETags on replacement, including multipart or block uploads.
-Local files use atomic replacement and fsync under the stack lock. S3-compatible
+PostgreSQL uses atomic insert-if-absent for journal objects and exact row-value
+comparison when replacing checkpoints. Local files use atomic replacement and
+fsync under the stack lock. S3-compatible
 services must honor conditional writes and strongly consistent reads and listings.
 Cleanup retains base and clean objects until the manifest is deleted, so an
 interrupted cleanup remains recoverable; a crash after deletion can leave inert
@@ -60,5 +62,6 @@ export. Hash mismatch alone never authorizes automatic deletion. Pending provide
 operations still require normal Pulumi reconciliation.
 
 Disable journaling and complete recovery before downgrading. Provider packages,
-language SDKs and clean snapshot formats retain upstream contracts. Pulumi Cloud keeps upstream service-managed journaling; the DIY flag does not
-change its persistence behavior. Linux and macOS are the published CLI platforms.
+language SDKs and clean snapshot formats retain upstream contracts. Pulumi Cloud
+keeps upstream service-managed journaling; the DIY flag does not change its
+persistence behavior. Linux and macOS are the published CLI platforms.
