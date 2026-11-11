@@ -32,6 +32,7 @@ import (
 )
 
 type diyJournaler struct {
+	stream *rapidJournalStream
 	// engine.Journal has no context arguments.
 	ctx            context.Context
 	b              *diyBackend
@@ -53,14 +54,24 @@ var _ engine.Journal = (*diyJournaler)(nil)
 func (b *diyBackend) newDIYJournaler(ctx context.Context, ref *diyBackendReference,
 	m *journalManifest, sm secrets.Manager,
 ) *diyJournaler {
-	return &diyJournaler{
+	j := &diyJournaler{
 		ctx: ctx, b: b, dir: path.Join(b.journalDir(ref), m.Epoch, "entries"), sm: sm,
 		completed: map[uint64]bool{}, changed: make(chan struct{}), slots: make(chan struct{}, 50),
 	}
+	if m.Format == rapidJournalFormat {
+		j.stream = b.newRapidJournalStream(ctx, ref, m, sm)
+	}
+	return j
 }
 
 // AddJournalEntry queues immutable entries. Required writes wait until the submitted prefix is durable.
 func (j *diyJournaler) AddJournalEntry(entry engine.JournalEntry) error {
+	if j.stream != nil {
+		j.mu.Lock()
+		j.next++
+		j.mu.Unlock()
+		return j.stream.add(entry)
+	}
 	j.mu.Lock()
 	if j.closed {
 		j.mu.Unlock()
@@ -125,6 +136,9 @@ func (j *diyJournaler) AddJournalEntry(entry engine.JournalEntry) error {
 
 // Close waits for queued writes and returns all persistence failures.
 func (j *diyJournaler) Close() error {
+	if j.stream != nil {
+		return j.stream.close()
+	}
 	j.mu.Lock()
 	j.closed = true
 	j.mu.Unlock()

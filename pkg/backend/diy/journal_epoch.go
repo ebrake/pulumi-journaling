@@ -36,6 +36,7 @@ import (
 )
 
 type journalManifest struct {
+	Format     string `json:"format,omitempty"`
 	Version    int    `json:"version"`
 	Epoch      string `json:"epoch"`
 	Stack      string `json:"stack"`
@@ -63,7 +64,8 @@ func (b *diyBackend) journalManifest(ctx context.Context, ref *diyBackendReferen
 		decoded, err := hex.DecodeString(hash)
 		return err == nil && len(decoded) == 32
 	}
-	if m.Version != 2 || m.Stack != string(ref.FullyQualifiedName()) ||
+	validVersion := (m.Version == 2 && m.Format == "") || (m.Version == 3 && m.Format == rapidJournalFormat)
+	if !validVersion || m.Stack != string(ref.FullyQualifiedName()) ||
 		!validHash(m.BaseHash) || !validHash(m.GuardHash) || m.Checkpoint != b.stackPath(ctx, ref) {
 		return nil, errors.New("journal manifest identity, version or checkpoint mismatch; preserving journal")
 	}
@@ -141,6 +143,10 @@ func (b *diyBackend) startJournal(ctx context.Context, ref *diyBackendReference)
 	m := &journalManifest{
 		Version: 2, Epoch: id.String(), Stack: string(ref.FullyQualifiedName()),
 		Checkpoint: key, BaseHash: journalHash(base), GuardHash: journalHash(guard),
+	}
+	if b.rapid != nil {
+		m.Version = 3
+		m.Format = rapidJournalFormat
 	}
 	if err := b.journalPut(ctx, path.Join(b.journalDir(ref), m.Epoch, "base"), base); err != nil {
 		return nil, err

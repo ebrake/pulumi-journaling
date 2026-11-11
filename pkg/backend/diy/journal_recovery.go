@@ -51,7 +51,12 @@ func (b *diyBackend) prepareJournal(ctx context.Context, ref *diyBackendReferenc
 	if base.Latest == nil {
 		base.Latest = &apitype.DeploymentV3{}
 	}
-	entries, err := b.readJournalEntries(ctx, path.Join(b.journalDir(ref), m.Epoch, "entries"))
+	var entries []apitype.JournalEntry
+	if m.Format == rapidJournalFormat {
+		entries, err = b.readRapidJournal(ctx, ref, m)
+	} else {
+		entries, err = b.readJournalEntries(ctx, path.Join(b.journalDir(ref), m.Epoch, "entries"))
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -135,6 +140,15 @@ func (b *diyBackend) consolidateJournal(ctx context.Context, ref *diyBackendRefe
 	}
 	currentHash := journalHash(current)
 	if currentHash == m.BaseHash && clean == nil {
+		if m.Format == rapidJournalFormat {
+			exists, err := b.bucket.Exists(ctx, path.Join(dir, "journal.stream"))
+			if err != nil {
+				return err
+			}
+			if exists {
+				return errors.New("journal stream exists without guarded checkpoint; preserving epoch")
+			}
+		}
 		files, err := listBucket(ctx, b.bucket, path.Join(dir, "entries"))
 		if err != nil {
 			return err
@@ -184,6 +198,11 @@ func (b *diyBackend) clearJournal(ctx context.Context, ref *diyBackendReference,
 	files, err := listBucket(ctx, b.bucket, path.Join(dir, "entries"))
 	if err != nil {
 		return err
+	}
+	if m.Format == rapidJournalFormat {
+		if err := b.journalDelete(ctx, path.Join(dir, "journal.stream")); err != nil {
+			return err
+		}
 	}
 	var group errgroup.Group
 	group.SetLimit(b.getParallel())

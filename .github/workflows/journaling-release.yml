@@ -22,7 +22,7 @@ permissions:
 
 jobs:
   test:
-    if: github.repository == 'ebrake/pulumi-journaling' && github.ref == 'refs/heads/journaling' && !inputs.publish_prebuilt
+    if: github.repository == 'ebrake/pulumi-journaling' && (github.ref == 'refs/heads/journaling' || github.ref == 'refs/heads/main') && !inputs.publish_prebuilt
     uses: ./.github/workflows/journaling-test.yml
 
   build:
@@ -138,7 +138,7 @@ jobs:
           packages-dir: release/dist/
 
   prebuilt:
-    if: github.repository == 'ebrake/pulumi-journaling' && github.ref == 'refs/heads/journaling' && inputs.publish_prebuilt && inputs.publish_github && inputs.publish_pypi
+    if: github.repository == 'ebrake/pulumi-journaling' && (github.ref == 'refs/heads/journaling' || github.ref == 'refs/heads/main') && inputs.publish_prebuilt && inputs.publish_github && inputs.publish_pypi
     runs-on: ubuntu-latest
     environment: pypi
     permissions:

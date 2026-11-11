@@ -34,6 +34,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"cloud.google.com/go/storage"
+
 	"github.com/gofrs/uuid"
 
 	"gocloud.dev/blob"
@@ -43,7 +45,6 @@ import (
 	_ "gocloud.dev/blob/s3blob"   // driver for s3://
 	"gocloud.dev/gcerrors"
 
-	"github.com/pulumi/pulumi/pkg/v3/authhelpers"
 	"github.com/pulumi/pulumi/pkg/v3/backend"
 	"github.com/pulumi/pulumi/pkg/v3/backend/backenderr"
 	"github.com/pulumi/pulumi/pkg/v3/backend/display"
@@ -122,6 +123,7 @@ type diyBackend struct {
 	url         string
 
 	bucket Bucket
+	rapid  *rapidBucket
 	mutex  sync.Mutex
 
 	lockID string
@@ -265,11 +267,12 @@ func newDIYBackend(
 	}
 
 	blobmux := blob.DefaultURLMux()
+	var rapidClient *storage.Client
 
 	// for gcp we want to support additional credentials
 	// schemes on top of go-cloud's default credentials mux.
 	if p.Scheme == gcsblob.Scheme {
-		blobmux, err = authhelpers.GoogleCredentialsMux(ctx)
+		blobmux, rapidClient, err = gcsBackendMux(ctx, p)
 		if err != nil {
 			return nil, err
 		}
@@ -288,6 +291,7 @@ func newDIYBackend(
 		})
 	}
 
+	u = p.String()
 	bucket, err := blobmux.OpenBucket(ctx, u)
 	if err != nil {
 		return nil, fmt.Errorf("unable to open %s %s: %w",
@@ -316,7 +320,10 @@ func newDIYBackend(
 		return nil, err
 	}
 
-	wbucket := &wrappedBucket{bucket: bucket}
+	var wbucket Bucket = &wrappedBucket{bucket: bucket}
+	if rapidClient != nil {
+		wbucket = &rapidBucket{Bucket: wbucket, client: rapidClient, name: p.Host, prefix: rapidBucketPrefix(p)}
+	}
 
 	// Prevent accidental use of the unwrapped bucket.
 	//
@@ -331,6 +338,9 @@ func newDIYBackend(
 		lockID:      lockID.String(),
 		compression: compression,
 		Env:         opts.Env,
+	}
+	if rapidClient != nil {
+		backend.rapid = wbucket.(*rapidBucket)
 	}
 	backend.currentProject.Store(project)
 

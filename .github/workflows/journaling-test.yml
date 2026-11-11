@@ -2,9 +2,9 @@ name: Journaling validation
 
 on:
   push:
-    branches: [journaling]
+    branches: [journaling, main]
   pull_request:
-    branches: [journaling]
+    branches: [journaling, main]
   workflow_call:
   workflow_dispatch:
 
