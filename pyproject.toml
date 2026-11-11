@@ -1,0 +1,43 @@
+# Modified by E Brake for the independent pulumi-journaling distribution.
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pulumi-journaling"
+version = "3.274.1.post1"
+description = "Independent Pulumi CLI fork with hardened, recoverable journaling for every DIY storage backend"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE", "AUTHORS.md"]
+authors = [
+  {name = "E Brake", email = "ebrake123@icloud.com"},
+  {name = "Pulumi Corporation and contributors"},
+]
+maintainers = [{name = "E Brake", email = "ebrake123@icloud.com"}]
+dependencies = ["pulumi==3.274.1"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: MacOS",
+  "Topic :: System :: Systems Administration",
+]
+
+[project.urls]
+Homepage = "https://github.com/ebrake/pulumi-journaling"
+Documentation = "https://github.com/ebrake/pulumi-journaling/blob/journaling/docs/diy-journaling.md"
+Source = "https://github.com/ebrake/pulumi-journaling"
+Issues = "https://github.com/ebrake/pulumi-journaling/issues"
+Upstream = "https://github.com/pulumi/pulumi"
+
+[project.scripts]
+pulumi = "pulumi_journaling:main"
+pulumi-journaling = "pulumi_journaling:main"
+
+[tool.setuptools.packages.find]
+where = ["python"]
+include = ["pulumi_journaling*"]
+
+[tool.setuptools.package-data]
+pulumi_journaling = ["release.json"]

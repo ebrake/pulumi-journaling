@@ -1,3 +1,4 @@
+# Modified by E Brake to recognize independent fork copyright notices.
 version: "2"
 linters:
   enable:
@@ -101,9 +102,10 @@ linters:
       values:
         regexp:
           COPYRIGHT_YEARS: \d{4}
+          COPYRIGHT_OWNER: "(Pulumi Corporation|E Brake)"
           WHITESPACE: '[ ]{4}'
       template: |-
-        Copyright {{ COPYRIGHT_YEARS }}, Pulumi Corporation.
+        Copyright {{ COPYRIGHT_YEARS }}, {{ COPYRIGHT_OWNER }}.
 
         Licensed under the Apache License, Version 2.0 (the "License");
         you may not use this file except in compliance with the License.

@@ -1,0 +1,133 @@
+name: Journaling release
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish_github:
+        description: Publish the validated GitHub CLI release
+        type: boolean
+        default: false
+      publish_pypi:
+        description: Publish the Python distribution using the PyPI trusted publisher
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    if: github.repository == 'ebrake/pulumi-journaling' && github.ref == 'refs/heads/journaling'
+    uses: ./.github/workflows/journaling-test.yml
+
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-amd64
+            runner: ubuntu-latest
+          - platform: linux-arm64
+            runner: ubuntu-24.04-arm
+          - platform: darwin-arm64
+            runner: macos-15
+          - platform: darwin-amd64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version: '1.27.4'
+          cache-dependency-path: |
+            pkg/go.sum
+            sdk/go.sum
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with:
+          python-version: '3.14'
+      - name: Build verified platform bundle
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: python scripts/journaling-release.py --platform "$PLATFORM" --output artifacts
+      - name: Exercise the platform CLI and crash recovery
+        run: |
+          python -m venv /tmp/journal-python
+          VERSION=$(python -c 'import json; print(json.load(open("journaling-release.json"))["upstreamVersion"])')
+          /tmp/journal-python/bin/pip install "pulumi==$VERSION"
+          mkdir -p /tmp/journal-bundle
+          tar -xzf artifacts/*.tar.gz -C /tmp/journal-bundle
+          export PATH="/tmp/journal-bundle/pulumi:$PATH"
+          python scripts/journaling-smoke.py --cli /tmp/journal-bundle/pulumi/pulumi --python /tmp/journal-python/bin/python
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: journaling-${{ matrix.platform }}
+          path: artifacts/*
+          compression-level: 0
+
+  package:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with:
+          python-version: '3.14'
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          pattern: journaling-*
+          merge-multiple: true
+          path: artifacts
+      - name: Build the Python distribution with pinned bundle hashes
+        run: |
+          python scripts/journaling-release.py --merge --output artifacts
+          python scripts/journaling-release.py --python-package --output artifacts
+          python -m pip install build twine
+          python -m build
+          python -m twine check --strict dist/*
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: release-artifacts
+          path: |
+            artifacts/*
+            dist/*
+          compression-level: 0
+
+  github:
+    if: inputs.publish_github
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: release-artifacts
+          path: release
+      - name: Publish immutable CLI release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_COMMIT: ${{ github.sha }}
+        run: |
+          VERSION=$(python -c 'import json; print(json.load(open("journaling-release.json"))["version"])')
+          gh release create "v$VERSION" release/artifacts/*.tar.gz release/artifacts/pulumi-cli.json release/dist/* \
+            --repo ebrake/pulumi-journaling --target "$SOURCE_COMMIT" \
+            --title "pulumi-journaling $VERSION" \
+            --notes 'Independent fork of Pulumi v3.274.1. Recoverable journaling for local files, GCS, S3, Azure Blob and PostgreSQL. Based on https://github.com/pulumi/pulumi/pull/22074 and hardened by E Brake. Guide: https://github.com/ebrake/pulumi-journaling/blob/journaling/docs/diy-journaling.md'
+
+  pypi:
+    if: inputs.publish_pypi && inputs.publish_github
+    needs: github
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: release-artifacts
+          path: release
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086
+        with:
+          packages-dir: release/dist/

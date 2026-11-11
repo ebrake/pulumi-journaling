@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Modified by E Brake for pulumi-journaling: durable DIY journaling and recovery.
+
 package operations
 
 import (
@@ -224,6 +226,9 @@ func NewDestroyCmd() *cobra.Command {
 				configFile,
 			)
 			if err != nil {
+				return err
+			}
+			if err := recoverDIYJournal(ctx, s, opts.PreviewOnly); err != nil {
 				return err
 			}
 			if err := cmdStack.RejectConfigFlagsOnManagedStack(s, configArray, configFile); err != nil {

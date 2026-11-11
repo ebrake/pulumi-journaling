@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Modified by E Brake for pulumi-journaling: immutable and conditional object writes.
+
 // Package postgres implements a blob.Bucket storage backend using PostgreSQL.
 //
 // SECURITY NOTE - SQL Injection Prevention:
@@ -67,6 +69,16 @@ type Bucket struct {
 
 //go:embed schema.sql
 var tableSchema string
+
+// ObjectVersion identifies the exact stored JSON observed by a reader.
+type ObjectVersion string
+
+// WriteConditions provides an optional exact-version precondition for a write.
+type WriteConditions struct {
+	IfMatch *ObjectVersion
+}
+
+var errWritePrecondition = errors.New("PostgreSQL object write precondition failed")
 
 // NewPostgresBucket creates a new Bucket.
 func NewPostgresBucket(ctx context.Context, u *url.URL) (*Bucket, error) {
@@ -170,6 +182,9 @@ func (d *postgresBucketDriver) ErrorAs(err error, i any) bool {
 
 // ErrorCode implements driver.Bucket.ErrorCode.
 func (d *postgresBucketDriver) ErrorCode(err error) gcerrors.ErrorCode {
+	if errors.Is(err, errWritePrecondition) {
+		return gcerrors.FailedPrecondition
+	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return gcerrors.NotFound
 	}
@@ -386,6 +401,7 @@ func (d *postgresBucketDriver) NewRangeReader(
 		size:     length,
 		modTime:  time.Now(),
 		metadata: nil,
+		version:  ObjectVersion(dataJSON),
 	}, nil
 }
 
@@ -393,7 +409,20 @@ func (d *postgresBucketDriver) NewRangeReader(
 func (d *postgresBucketDriver) NewTypedWriter(
 	ctx context.Context, key string, contentType string, opts *driver.WriterOptions,
 ) (driver.Writer, error) {
+	conditions := &WriteConditions{}
+	if opts.BeforeWrite != nil {
+		if err := opts.BeforeWrite(func(i any) bool {
+			p, ok := i.(**WriteConditions)
+			if ok {
+				*p = conditions
+			}
+			return ok
+		}); err != nil {
+			return nil, err
+		}
+	}
 	return &postgresWriter{
+		conditions:  conditions,
 		ctx:         ctx,
 		bucket:      d.bucket,
 		key:         key,
@@ -443,6 +472,7 @@ func (d *postgresBucketDriver) Close() error {
 
 // postgresReader implements driver.Reader for PostgreSQL.
 type postgresReader struct {
+	version  ObjectVersion
 	r        io.ReadSeeker
 	size     int64
 	modTime  time.Time
@@ -475,11 +505,16 @@ func (r *postgresReader) Attributes() *driver.ReaderAttributes {
 
 // As implements driver.Reader.As.
 func (r *postgresReader) As(i any) bool {
-	return false
+	p, ok := i.(*ObjectVersion)
+	if ok {
+		*p = r.version
+	}
+	return ok
 }
 
 // postgresWriter implements driver.Writer for PostgreSQL.
 type postgresWriter struct {
+	conditions  *WriteConditions
 	ctx         context.Context
 	bucket      *Bucket
 	key         string
@@ -509,8 +544,30 @@ func (w *postgresWriter) Close() error {
 		"INSERT INTO %s (key, data) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET data = $2, updated_at = now()",
 		w.bucket.tableName,
 	)
-	_, err = w.bucket.db.ExecContext(w.ctx, query, w.key, string(jsonData))
-	return err
+	args := []any{w.key, string(jsonData)}
+	conditional := w.opts.IfNotExist || w.conditions.IfMatch != nil
+	if w.conditions.IfMatch != nil {
+		query = fmt.Sprintf( //nolint:gosec // The table identifier comes from the backend configuration.
+			"UPDATE %s SET data = $2, updated_at = now() WHERE key = $1 AND data::text = $3", w.bucket.tableName)
+		args = append(args, string(*w.conditions.IfMatch))
+	} else if w.opts.IfNotExist {
+		query = fmt.Sprintf( //nolint:gosec // The table identifier comes from the backend configuration.
+			"INSERT INTO %s (key, data) VALUES ($1, $2) ON CONFLICT (key) DO NOTHING", w.bucket.tableName)
+	}
+	result, err := w.bucket.db.ExecContext(w.ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	if conditional {
+		count, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if count != 1 {
+			return errWritePrecondition
+		}
+	}
+	return nil
 }
 
 // As implements driver.Writer.As.

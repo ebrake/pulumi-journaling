@@ -1,0 +1,59 @@
+name: Journaling validation
+
+on:
+  push:
+    branches: [journaling]
+  pull_request:
+    branches: [journaling]
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    if: github.repository == 'ebrake/pulumi-journaling'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version: '1.27.4'
+          cache-dependency-path: |
+            pkg/go.sum
+            sdk/go.sum
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with:
+          python-version: '3.14'
+      - run: python -m pip install boto3 azure-storage-blob ruff
+      - name: Validate Python helpers
+        run: |
+          ruff check python scripts/journaling-*.py scripts/tests/test_journaling_release.py
+          ruff format --check python scripts/journaling-*.py scripts/tests/test_journaling_release.py
+          PYTHONPATH=python python -m unittest discover -s python/tests -v
+          python -m unittest discover -s scripts/tests -v
+      - name: Validate changelog
+        run: |
+          VERSION=$(python -c 'import tomllib; print(tomllib.load(open(".mise.toml", "rb"))["tools"]["changie"])')
+          go run "github.com/miniscruff/changie@v$VERSION" batch auto --dry-run
+      - name: Start isolated storage services
+        run: docker compose -f .github/docker-compose-journaling.yml up -d
+      - name: Exercise every DIY storage backend
+        run: python scripts/journaling-storage-test.py
+      - name: Exercise shared state and command behavior
+        working-directory: pkg
+        run: go test -race ./backend ./backend/httpstate ./engine ./resource/stack ./cmd/pulumi/state ./cmd/pulumi/operations ./engine/lifecycletest/...
+      - name: Build repository linter
+        run: |
+          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
+          golangci-lint custom
+      - name: Lint changed packages
+        run: |
+          cd pkg
+          ../bin/custom-gcl run ./backend/diy/... ./cmd/pulumi/state ./cmd/pulumi/operations --config ../.golangci.yml --timeout 5m
+          cd ../sdk
+          ../bin/custom-gcl run ./go/common/env --config ../.golangci.yml --timeout 5m
+      - name: Stop isolated storage services
+        if: always()
+        run: docker compose -f .github/docker-compose-journaling.yml down --volumes

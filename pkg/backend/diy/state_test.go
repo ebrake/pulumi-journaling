@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Modified by E Brake for pulumi-journaling: durable DIY journaling and recovery.
+
 package diy
 
 import (
@@ -108,6 +110,10 @@ func (s *spyBucket) List(opts *blob.ListOptions) *blob.ListIterator {
 
 func (s *spyBucket) SignedURL(ctx context.Context, key string, opts *blob.SignedURLOptions) (string, error) {
 	return s.inner.SignedURL(ctx, key, opts)
+}
+
+func (s *spyBucket) NewReader(ctx context.Context, key string, opts *blob.ReaderOptions) (*blob.Reader, error) {
+	return s.inner.NewReader(ctx, key, opts)
 }
 
 func (s *spyBucket) ReadAll(ctx context.Context, key string) ([]byte, error) {

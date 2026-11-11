@@ -1,0 +1,4 @@
+component: backend/diy
+kind: feat
+body: Add opt-in recoverable journaling for all DIY state backends with ordered durability, concurrent readers and evidence-preserving recovery
+time: 2026-11-10T00:00:00Z

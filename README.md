@@ -1,204 +1,53 @@
-<p align="center">
-    <a href="https://www.pulumi.com/?utm_source=github.com&utm_medium=referral&utm_campaign=pulumi-pulumi-github-repo&utm_content=top+logo" title="Pulumi - Modern Infrastructure as Code - AWS Azure Kubernetes Containers Serverless">
-        <picture>
-            <source media="(prefers-color-scheme: dark)" srcset="https://www.pulumi.com/images/logo/logo-on-black.svg">
-            <img src="https://www.pulumi.com/images/logo/logo-on-white.svg" alt="Pulumi" width="350">
-        </picture>
-    </a>
-</p>
+# pulumi-journaling
 
-[![Slack](https://www.pulumi.com/images/docs/badges/slack.svg)](https://slack.pulumi.com/)
-[![GitHub Discussions](https://img.shields.io/github/discussions/pulumi/pulumi)](https://github.com/pulumi/pulumi/discussions)
-[![NPM version](https://badge.fury.io/js/%40pulumi%2Fpulumi.svg)](https://www.npmjs.com/package/@pulumi/pulumi)
-[![Python version](https://badge.fury.io/py/pulumi.svg)](https://pypi.org/project/pulumi)
-[![NuGet version](https://badge.fury.io/nu/pulumi.svg)](https://www.nuget.org/packages/pulumi)
-[![GoDoc](https://pkg.go.dev/badge/github.com/pulumi/pulumi.svg)](https://pkg.go.dev/github.com/pulumi/pulumi)
-[![License](https://img.shields.io/github/license/pulumi/pulumi)](LICENSE)
+An independent fork of [Pulumi](https://github.com/pulumi/pulumi), maintained by **E Brake** <ebrake123@icloud.com>, with hardened, recoverable journaling for every DIY state storage backend: local files, Amazon S3 and compatible stores, Google Cloud Storage, Azure Blob Storage, and PostgreSQL. Based on upstream **v3.274.1** at commit [`8f735e662d805b7a5bda70931bd627c69fbf38b8`](https://github.com/pulumi/pulumi/commit/8f735e662d805b7a5bda70931bd627c69fbf38b8), the latest stable release when this fork was prepared.
 
-# Infrastructure as Code for Humans and Agents
+This project is independently maintained and is not affiliated with, sponsored by, or endorsed by Pulumi Corporation. Pulumi is a trademark of Pulumi Corporation.
 
-<a href="https://www.pulumi.com/docs/get-started/">
-    <img src="https://www.pulumi.com/images/get-started.svg?" align="right" width="120">
-</a>
+## Install
 
-**Pulumi Infrastructure as Code** is the easiest way to build and deploy infrastructure, of any architecture and on any cloud, using programming languages that you already know and love. Code and ship infrastructure faster with your favorite languages and tools, and embed IaC anywhere with [Automation API](https://www.pulumi.com/docs/iac/automation-api/).
-
-Simply write code in your favorite language and Pulumi automatically provisions and manages your resources on
-[AWS](https://www.pulumi.com/docs/integrations/clouds/aws/),
-[Azure](https://www.pulumi.com/docs/integrations/clouds/azure/),
-[Google Cloud Platform](https://www.pulumi.com/docs/integrations/clouds/gcp/),
-[Kubernetes](https://www.pulumi.com/docs/integrations/clouds/kubernetes/), and [300+ providers](https://www.pulumi.com/registry/) using an
-[infrastructure-as-code](https://www.pulumi.com/what-is/what-is-infrastructure-as-code/) approach.
-Skip the YAML, and use standard language features like loops, functions, classes,
-and package management that you already know and love.
-
-For example, create three web servers:
-
-```typescript
-import * as aws from "@pulumi/aws";
-
-const ami = aws.ec2.getAmiOutput({
-    mostRecent: true,
-    owners: ["amazon"],
-    filters: [{ name: "name", values: ["al2023-ami-*-x86_64"] }],
-});
-
-const sg = new aws.ec2.SecurityGroup("web-sg", {
-    ingress: [{ protocol: "tcp", fromPort: 80, toPort: 80, cidrBlocks: ["0.0.0.0/0"] }],
-});
-
-for (const i of [0, 1, 2]) {
-    new aws.ec2.Instance(`web-${i}`, {
-        ami: ami.id,
-        instanceType: "t3.micro",
-        vpcSecurityGroupIds: [sg.id],
-        userData: `#!/bin/bash
-            echo "Hello, World!" > index.html
-            nohup python3 -m http.server 80 &`,
-    });
-}
+```sh
+python -m pip install pulumi-journaling==3.274.1.post1
+pulumi-journaling version
 ```
 
-Or a simple serverless timer that archives Hacker News every day at 8:30AM:
+The Python distribution provides both `pulumi-journaling` and `pulumi` commands, plus the matching upstream Python SDK, so existing `import pulumi` programs continue to work. On first invocation, the launcher downloads the matching CLI and language hosts from this fork's [GitHub releases](https://github.com/ebrake/pulumi-journaling/releases), verifies the SHA-256 checksum embedded in the Python package, and caches the bundle. That first invocation requires network access. Set `PULUMI_JOURNALING_CACHE` to choose the cache directory. Linux and macOS on x86-64 and ARM64 are supported; Windows packages are not currently published.
 
-```typescript
-import * as aws from "@pulumi/aws";
-import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, PutCommand } from "@aws-sdk/lib-dynamodb";
+The Python launcher enables DIY journaling by default. Existing Pulumi commands and backend URLs continue to work:
 
-const snapshots = new aws.dynamodb.Table("snapshots", {
-    attributes: [{ name: "id", type: "S" }],
-    hashKey: "id",
-    billingMode: "PAY_PER_REQUEST",
-});
-
-aws.cloudwatch.onSchedule("daily-yc-snapshot", "cron(30 8 * * ? *)", async () => {
-    const res = await fetch("https://news.ycombinator.com");
-    const content = await res.text();
-
-    const client = DynamoDBDocumentClient.from(new DynamoDBClient({}));
-    await client.send(new PutCommand({
-        TableName: snapshots.name.get(),
-        Item: { id: `${Date.now()}`, content },
-    }));
-});
+```sh
+pulumi login 's3://my-state-bucket'
+pulumi up
 ```
 
-Many examples are available spanning containers, serverless, and infrastructure in
-[pulumi/examples](https://github.com/pulumi/examples).
+Set `PULUMI_DIY_BACKEND_JOURNALING=false` to stop creating new journal epochs. Recovery of an unfinished epoch still runs before a mutating operation. Standalone GitHub bundles require `PULUMI_DIY_BACKEND_JOURNALING=true` to opt in. Pulumi Cloud retains its upstream service-managed persistence and journaling behavior.
 
-Pulumi is open source under the [Apache 2.0 license](https://github.com/pulumi/pulumi/blob/master/LICENSE), supports many languages and clouds, and is easy to extend.  This
-repo contains the `pulumi` CLI, language SDKs, and core Pulumi engine, and individual libraries are in their own repos.
+## Basis and hardening
 
-## Welcome
+DIY journaling is based on **Jason Rowsell's prototype in [Pulumi PR #22074](https://github.com/pulumi/pulumi/pull/22074)**. E Brake hardened and extended that basis with:
 
-<img align="right" width="400" src="/quickstart_terminal.png" alt="Pulumi quickstart terminal" />
+- Encrypted immutable entries, bounded asynchronous writes, and acknowledgements that wait for the entire submitted prefix to become durable
+- Epoch identity, checkpoint hashes and required-feature guards that prevent stock clients from consuming an unfinished journal
+- Native stack locking, crash-safe consolidation, idempotent recovery, and preservation of unexpected or corrupt state
+- Consistent read-only access to the last clean checkpoint, provider-free recovery, and explicit evidence-preserving discard
+- Checkpoint backups, retention and compression support, integrity reporting, and protection against completing a replaced epoch
+- Conditional checkpoint replacement for GCS generations, S3 ETags Azure ETags, and exact PostgreSQL row versions, plus atomic replacement and fsync for local files
+- Fault-injection, cancellation, durability-ordering, concurrent-reader, recovery and storage-driver tests; version-pinned CLI bundles and a checksummed Python launcher
 
-* **[Get Started with Pulumi](https://www.pulumi.com/docs/get-started/)**: Deploy a simple application in AWS, Azure, Google Cloud, or Kubernetes using Pulumi.
+See the [journaling and recovery guide](https://github.com/ebrake/pulumi-journaling/blob/journaling/docs/diy-journaling.md) for operational details and tradeoffs. S3-compatible services must implement conditional writes and strongly consistent reads and listings. An endpoint that rejects required preconditions fails the operation; the CLI does not fall back to unconditional checkpoint replacement.
 
-* **[Learn](https://www.pulumi.com/tutorials/)**: Follow Pulumi learning pathways to learn best practices and architectural patterns through authentic examples.
+## Recovery
 
-* **[Examples](https://github.com/pulumi/examples)**: Browse several examples across many languages,
-  clouds, and scenarios including containers, serverless, and infrastructure.
+```sh
+pulumi state journal recover --stack organization/project/stack
+```
 
-* **[Docs](https://www.pulumi.com/docs/)**: Learn about Pulumi concepts, follow user-guides, and consult the reference documentation.
+Recovery invokes no resource providers. If the previous process crashed, first verify it has stopped, then remove its stale native lock with `pulumi cancel`. If recovery refuses corrupt or unexplained state, preserve the evidence and consult the [recovery guide](https://github.com/ebrake/pulumi-journaling/blob/journaling/docs/diy-journaling.md) before using `pulumi state journal discard --yes`.
 
-* **[Registry](https://www.pulumi.com/registry/)**: Find the Pulumi Package with the resources you need. Install the package directly into your project, browse the API documentation, and start building.
+Complete recovery before changing to an upstream CLI or another fork. Clean snapshots and provider packages retain upstream contracts.
 
-* **[Secrets Management](https://www.pulumi.com/product/secrets-management/)**: Tame secrets sprawl and configuration complexity securely across all your cloud infrastructure and applications with Pulumi ESC.
+## Development and releases
 
-* **[Community Slack](https://slack.pulumi.com/)**: Join us in Pulumi Community Slack. All conversations and questions are welcome.
+The [release configuration](https://github.com/ebrake/pulumi-journaling/blob/journaling/journaling-release.json) pins the upstream commit and archive checksums. The [validation workflow](https://github.com/ebrake/pulumi-journaling/blob/journaling/.github/workflows/journaling-test.yml) runs regression tests, linters, lifecycle tests and the actual file, GCS, S3, Azure and PostgreSQL storage drivers against isolated local emulators. The [release workflow](https://github.com/ebrake/pulumi-journaling/blob/journaling/.github/workflows/journaling-release.yml) builds all four platform bundles, exercises the CLI, packages the launcher with the resulting checksums, and can publish to GitHub and PyPI.
 
-* **[GitHub Discussions](https://github.com/pulumi/pulumi/discussions)**: Ask questions or share what you're building with Pulumi.
-
-## <a name="getting-started"></a>Getting Started
-
-[![Watch the video](/youtube_preview_image.png)](https://www.youtube.com/watch?v=Q8tw6YTD3ac)
-
-See the [Get Started](https://www.pulumi.com/docs/get-started/) guide to quickly get started with
-Pulumi on your platform and cloud of choice.
-
-Otherwise, the following steps demonstrate how to deploy your first Pulumi program, using AWS
-Serverless Lambdas, in minutes:
-
-1. **Install**:
-
-    To install the latest Pulumi release, run the following (see full
-    [installation instructions](https://www.pulumi.com/docs/install/) for additional installation options):
-
-    ```bash
-    curl -fsSL https://get.pulumi.com/ | sh
-    ```
-
-2. **Create a Project**:
-
-    After installing, you can get started with the `pulumi new` command:
-
-    ```bash
-    mkdir pulumi-demo && cd pulumi-demo
-    pulumi new serverless-aws-typescript
-    ```
-
-    The `new` command offers [templates](https://github.com/pulumi/templates/) for all languages and clouds.  Run it without an argument and it'll prompt
-    you with available projects.  This command creates an AWS Serverless Lambda project written in TypeScript.
-
-3. **Deploy to the Cloud**:
-
-    Run `pulumi up` to get your code to the cloud:
-
-    ```bash
-    pulumi up
-    ```
-
-    This makes all cloud resources needed to run your code.  Simply make edits to your project, and subsequent
-    `pulumi up`s will compute the minimal diff to deploy your changes.
-
-4. **Use Your Program**:
-
-    Now that your code is deployed, you can interact with it.  In the above example, we can curl the endpoint:
-
-    ```bash
-    curl $(pulumi stack output url)
-    ```
-
-5. **Access the Logs**:
-
-    If you're using containers or functions, Pulumi's unified logging command will show all of your logs:
-
-    ```bash
-    pulumi logs -f
-    ```
-
-6. **Destroy your Resources**:
-
-    After you're done, you can remove all resources created by your program:
-
-    ```bash
-    pulumi destroy -y
-    ```
-
-To learn more, head over to [pulumi.com](https://www.pulumi.com/) for much more information, including
-[tutorials](https://www.pulumi.com/tutorials/), [examples](https://github.com/pulumi/examples), and
-details of the core Pulumi CLI and [programming model concepts](https://www.pulumi.com/docs/iac/concepts/).
-
-## <a name="platform"></a>Platform
-
-### Languages
-
-|    | Language | Status | Runtime | Versions |
-| -- | -------- | ------ | ------- | -------- |
-| <img src="https://www.pulumi.com/logos/tech/logo-js.png" height=38 />     | [JavaScript](https://www.pulumi.com/docs/iac/languages-sdks/javascript/) | Stable  | Node.js | [Current, Active and Maintenance LTS versions](https://nodejs.org/en/about/previous-releases)  |
-| <img src="https://www.pulumi.com/logos/tech/logo-ts.png" height=38 />     | [TypeScript](https://www.pulumi.com/docs/iac/languages-sdks/javascript/) | Stable  | Node.js | [Current, Active and Maintenance LTS versions](https://nodejs.org/en/about/previous-releases)  |
-| <img src="https://www.pulumi.com/logos/tech/logo-python.svg" height=38 /> | [Python](https://www.pulumi.com/docs/iac/languages-sdks/python/)     | Stable  | Python | [Supported versions](https://devguide.python.org/versions/#versions) |
-| <img src="https://www.pulumi.com/logos/tech/logo-golang.png" height=38 /> | [Go](https://www.pulumi.com/docs/iac/languages-sdks/go/)             | Stable  | Go | [Supported versions](https://go.dev/doc/devel/release#policy) |
-| <img src="https://www.pulumi.com/logos/tech/dotnet.svg" height=38 />      | [.NET (C#/F#/VB.NET)](https://www.pulumi.com/docs/iac/languages-sdks/dotnet/)     | Stable  | .NET | [Supported versions](https://dotnet.microsoft.com/en-us/platform/support/policy/dotnet-core#lifecycle)  |
-| <img src="https://www.pulumi.com/logos/tech/java.svg" height=38 />      | [Java](https://www.pulumi.com/docs/iac/languages-sdks/java/)     | Stable  | JDK | 11+  |
-| <img src="https://www.pulumi.com/logos/tech/yaml.svg" height=38 />      | [YAML](https://www.pulumi.com/docs/iac/languages-sdks/yaml/)     | Stable  | n/a  | n/a  |
-
-### Clouds
-
-Visit the [Registry](https://www.pulumi.com/registry/) for the full list of supported cloud and infrastructure providers.
-
-## Contributing
-
-Visit [CONTRIBUTING.md](https://github.com/pulumi/pulumi/blob/master/CONTRIBUTING.md) for information on building Pulumi from source or contributing improvements.
+The upstream [contributing guide](https://github.com/ebrake/pulumi-journaling/blob/journaling/CONTRIBUTING.md) covers the Go monorepo. Report fork issues in [this repository](https://github.com/ebrake/pulumi-journaling/issues). See [authors](https://github.com/ebrake/pulumi-journaling/blob/journaling/AUTHORS.md), [notices](https://github.com/ebrake/pulumi-journaling/blob/journaling/NOTICE) and the [Apache 2.0 license](https://github.com/ebrake/pulumi-journaling/blob/journaling/LICENSE).

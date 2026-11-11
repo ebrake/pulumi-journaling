@@ -1,0 +1,18 @@
+pulumi-journaling
+Independent fork maintained by E Brake <ebrake123@icloud.com>.
+
+Based on Pulumi, Copyright Pulumi Corporation and contributors,
+licensed under the Apache License, Version 2.0. The original license and
+copyright notices are retained in the source distribution.
+
+DIY journaling is based on Jason Rowsell's prototype:
+https://github.com/pulumi/pulumi/pull/22074
+E Brake hardened and extended that basis with encrypted durable writes,
+contiguous-prefix acknowledgement and replay, guarded checkpoints, epoch
+identity and hash validation, native stack locking, crash-safe recovery and
+consolidation, read-only isolation, evidence-preserving discard, backup and
+retention support, compression handling, and multi-backend conditional writes.
+
+This project is independently maintained and is not affiliated with,
+sponsored by, or endorsed by Pulumi Corporation. Pulumi is a trademark of
+Pulumi Corporation.

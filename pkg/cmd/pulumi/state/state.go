@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Modified by E Brake for pulumi-journaling: durable DIY journaling and recovery.
+
 package state
 
 import (
@@ -38,6 +40,7 @@ troubleshooting a stack or when performing specific edits that otherwise would r
 	cmd.AddCommand(newStateGetCommand(pkgWorkspace.Instance, cmdBackend.DefaultLoginManager))
 	cmd.AddCommand(newStatePromoteCommand(pkgWorkspace.Instance, cmdBackend.DefaultLoginManager))
 	cmd.AddCommand(newStateEditCommand())
+	cmd.AddCommand(newStateJournalCommand(pkgWorkspace.Instance, cmdBackend.DefaultLoginManager))
 	cmd.AddCommand(newStateMoveCommand())
 	cmd.AddCommand(newStateProtectCommand())
 	cmd.AddCommand(newStateRenameCommand())

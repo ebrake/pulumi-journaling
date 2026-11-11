@@ -12,18 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Modified by E Brake for pulumi-journaling: durable DIY journaling and recovery.
+
 package diy
 
 import (
+	"bytes"
 	"context"
+	"crypto/md5"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"path"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
+	azureblob "github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
+	azurecontainer "github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/container"
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/pulumi/pulumi/sdk/v3/go/common/util/logging"
 	"gocloud.dev/blob"
@@ -36,6 +44,7 @@ type Bucket interface {
 	Delete(ctx context.Context, key string) (err error)
 	List(opts *blob.ListOptions) *blob.ListIterator
 	SignedURL(ctx context.Context, key string, opts *blob.SignedURLOptions) (string, error)
+	NewReader(ctx context.Context, key string, opts *blob.ReaderOptions) (*blob.Reader, error)
 	ReadAll(ctx context.Context, key string) (_ []byte, err error)
 	WriteAll(ctx context.Context, key string, p []byte, opts *blob.WriterOptions) (err error)
 	Exists(ctx context.Context, key string) (bool, error)
@@ -124,12 +133,52 @@ func (b *wrappedBucket) SignedURL(ctx context.Context, key string, opts *blob.Si
 	return b.bucket.SignedURL(ctx, filepath.ToSlash(key), opts)
 }
 
+func (b *wrappedBucket) NewReader(ctx context.Context, key string, opts *blob.ReaderOptions) (*blob.Reader, error) {
+	return b.bucket.NewReader(ctx, filepath.ToSlash(key), opts)
+}
+
 func (b *wrappedBucket) ReadAll(ctx context.Context, key string) (_ []byte, err error) {
 	return b.bucket.ReadAll(ctx, filepath.ToSlash(key))
 }
 
 func (b *wrappedBucket) WriteAll(ctx context.Context, key string, p []byte, opts *blob.WriterOptions) (err error) {
-	return b.bucket.WriteAll(ctx, filepath.ToSlash(key), p, opts)
+	var client *azurecontainer.Client
+	if !b.bucket.As(&client) {
+		return b.bucket.WriteAll(ctx, filepath.ToSlash(key), p, opts)
+	}
+	var options blob.WriterOptions
+	if opts != nil {
+		options = *opts
+	}
+	sum := md5.Sum(p)
+	if len(options.ContentMD5) != 0 && !bytes.Equal(options.ContentMD5, sum[:]) {
+		return fmt.Errorf("Azure upload content does not match the supplied MD5")
+	}
+	// CDK's MD5 option disables driver.Upload, exposing azureblob's pipe-close race on errors.
+	// Validate locally, then let Azure validate every transferred block with CRC64.
+	options.ContentMD5 = nil
+	if options.ContentType == "" {
+		options.ContentType = http.DetectContentType(p)
+	}
+	before := options.BeforeWrite
+	options.BeforeWrite = func(as func(any) bool) error {
+		if before != nil {
+			if err := before(as); err != nil {
+				return err
+			}
+		}
+		var upload *azblob.UploadStreamOptions
+		if !as(&upload) {
+			return fmt.Errorf("Azure upload options unavailable")
+		}
+		if upload.HTTPHeaders == nil {
+			upload.HTTPHeaders = &azureblob.HTTPHeaders{}
+		}
+		upload.HTTPHeaders.BlobContentMD5 = sum[:]
+		upload.TransactionalValidation = azureblob.TransferValidationTypeComputeCRC64()
+		return nil
+	}
+	return b.bucket.Upload(ctx, filepath.ToSlash(key), bytes.NewReader(p), &options)
 }
 
 func (b *wrappedBucket) Exists(ctx context.Context, key string) (bool, error) {

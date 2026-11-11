@@ -1,0 +1,23 @@
+services:
+  s3:
+    image: rustfs/rustfs@sha256:b81d16a90ee25bd9511280127ca1471788c6e874cf0f0da759645f46b2dc1d74
+    command: ["/data"]
+    environment:
+      RUSTFS_ACCESS_KEY: journaltest
+      RUSTFS_SECRET_KEY: journaltestpassword
+    ports: ["127.0.0.1:19000:9000"]
+  azure:
+    image: mcr.microsoft.com/azure-storage/azurite@sha256:830430c1da1a2d537e08f3e6764dd1f5ae00cf0346bcaf625b968ec3f0971fd5
+    command: ["azurite-blob", "--blobHost", "0.0.0.0", "--skipApiVersionCheck"]
+    ports: ["127.0.0.1:11000:10000"]
+  gcs:
+    image: fsouza/fake-gcs-server@sha256:797ce226d62f947c009dc40246b30cfb456b8473d8241407f9d6f2c04e4d69ef
+    command: ["-scheme", "http", "-public-host", "127.0.0.1:14443"]
+    ports: ["127.0.0.1:14443:4443"]
+  postgres:
+    image: postgres@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
+    environment:
+      POSTGRES_USER: journaltest
+      POSTGRES_PASSWORD: journaltestpassword
+      POSTGRES_DB: journaltest
+    ports: ["127.0.0.1:15432:5432"]

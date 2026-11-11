@@ -107,3 +107,6 @@ yarn-error.log
 
 # Local mise.toml
 .mise.local.toml
+
+# Added by E Brake for pulumi-journaling Python distribution builds.
+/python/*.egg-info/

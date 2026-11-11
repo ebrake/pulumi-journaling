@@ -1,0 +1,2 @@
+include LICENSE NOTICE AUTHORS.md README.md
+recursive-include python/pulumi_journaling *.py *.json

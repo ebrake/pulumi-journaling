@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Modified by E Brake for pulumi-journaling: durable DIY journaling and recovery.
+
 package diy
 
 import (
@@ -23,6 +25,7 @@ import (
 	"io"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -201,13 +204,58 @@ func (b *diyBackend) getCheckpoint(
 	ctx context.Context,
 	ref *diyBackendReference,
 ) (*apitype.CheckpointV3, int, []string, error) {
+	return b.getCheckpointWithJournal(ctx, ref, false)
+}
+
+// getCleanCheckpoint rejects guarded state for exports and mutations under the stack lock.
+func (b *diyBackend) getCleanCheckpoint(
+	ctx context.Context, ref *diyBackendReference,
+) (*apitype.CheckpointV3, int, []string, error) {
+	return b.getCheckpointWithJournal(ctx, ref, true)
+}
+
+func (b *diyBackend) getCheckpointWithJournal(
+	ctx context.Context, ref *diyBackendReference, strict bool,
+) (*apitype.CheckpointV3, int, []string, error) {
 	chkpath := b.stackPath(ctx, ref)
 	byts, err := b.bucket.ReadAll(ctx, chkpath)
 	if err != nil {
 		return nil, 0, nil, err
 	}
+	cp, err := decodeJournalCheckpoint(byts)
+	if err != nil {
+		return nil, 0, nil, err
+	}
+	if slices.Contains(cp.Features, diyJournalFeature) {
+		if strict {
+			return nil, 0, nil, fmt.Errorf(
+				"unfinished journal; run pulumi state journal recover --stack %s (or explicitly discard it)", ref)
+		}
+		m, err := b.journalManifest(ctx, ref)
+		if err != nil {
+			return nil, 0, nil, err
+		}
+		var base []byte
+		if m != nil {
+			base, err = b.journalBase(ctx, ref, m)
+		}
+		if m == nil || err != nil {
+			// Consolidation may have completed between reading the guard and loading its base.
+			current, readErr := b.bucket.ReadAll(ctx, chkpath)
+			if readErr == nil && !bytes.Equal(byts, current) {
+				return b.getCheckpointWithJournal(ctx, ref, strict)
+			}
+			if err != nil {
+				return nil, 0, nil, err
+			}
+			return nil, 0, nil, fmt.Errorf("%s checkpoint has no active manifest; preserving state", diyJournalFeature)
+		}
+		if journalHash(byts) != m.GuardHash {
+			return nil, 0, nil, errors.New("guarded checkpoint hash mismatch; preserving journal")
+		}
+		byts = base
+	}
 	m := encoding.Compress(encoding.JSON, encoding.DetectCompression(byts))
-
 	return stack.UnmarshalVersionedCheckpointToLatestCheckpoint(m, byts)
 }
 
@@ -359,14 +407,21 @@ func (b *diyBackend) saveCheckpoint(
 
 	logging.V(7).Infof("Saved stack %s checkpoint to: %s (backup=%s)", ref.FullyQualifiedName(), file, backupFile)
 
-	// And if we are retaining historical checkpoint information, write it out again
-	if b.Env.GetBool(env.DIYBackendRetainCheckpoints) {
-		if err = b.bucket.WriteAll(ctx, fmt.Sprintf("%v.%v", file, time.Now().UnixNano()), byts, nil); err != nil {
-			return backupFile, "", fmt.Errorf("An IO error occurred while writing the new snapshot file: %w", err)
-		}
+	if err := b.retainCheckpoint(ctx, file, byts); err != nil {
+		return backupFile, "", err
 	}
 
 	return backupFile, file, nil
+}
+
+// retainCheckpoint saves a historical copy when checkpoint retention is enabled.
+func (b *diyBackend) retainCheckpoint(ctx context.Context, file string, data []byte) error {
+	if b.Env.GetBool(env.DIYBackendRetainCheckpoints) {
+		if err := b.bucket.WriteAll(ctx, fmt.Sprintf("%v.%v", file, time.Now().UnixNano()), data, nil); err != nil {
+			return fmt.Errorf("An IO error occurred while writing the new snapshot file: %w", err)
+		}
+	}
+	return nil
 }
 
 func (b *diyBackend) saveStack(

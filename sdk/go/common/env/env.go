@@ -16,6 +16,8 @@
 //
 // Public environmental variables should be declared as a module level variable.
 
+// Modified by E Brake for pulumi-journaling: durable DIY journaling and recovery.
+
 package env
 
 import (
@@ -199,6 +201,8 @@ var (
 	DIYBackendLegacyLayout = env.Bool("DIY_BACKEND_LEGACY_LAYOUT",
 		"Uses the legacy layout for new buckets, which currently default to project-scoped stacks.",
 		env.Alternative("SELF_MANAGED_STATE_LEGACY_LAYOUT"))
+
+	DIYBackendJournaling = env.Bool("DIY_BACKEND_JOURNALING", "Enable journaling for all DIY state backends")
 
 	DIYBackendGzip = env.Bool("DIY_BACKEND_GZIP",
 		"Enables gzip compression when writing state files.",

@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Modified by E Brake for pulumi-journaling: durable DIY journaling and recovery.
+
 package diy
 
 import (
@@ -102,6 +104,12 @@ type Backend interface {
 
 	// Lock the specified stack reference in this backend.
 	Lock(ctx context.Context, stackRef backend.StackReference) error
+
+	// RecoverJournal consolidates unfinished state without invoking providers.
+	RecoverJournal(ctx context.Context, stackRef backend.StackReference) error
+
+	// DiscardJournal archives an unfinished epoch and removes its checkpoint guard.
+	DiscardJournal(ctx context.Context, stackRef backend.StackReference) error
 }
 
 type diyBackend struct {
@@ -540,7 +548,7 @@ func (b *diyBackend) Upgrade(ctx context.Context, opts *UpgradeOptions) error {
 func (b *diyBackend) guessProject(ctx context.Context, old *diyBackendReference) (tokens.Name, error) {
 	contract.Requiref(old.project == "", "old.project", "must be empty")
 
-	chk, _, _, err := b.getCheckpoint(ctx, old)
+	chk, _, _, err := b.getCleanCheckpoint(ctx, old)
 	if err != nil {
 		return "", fmt.Errorf("read checkpoint: %w", err)
 	}
@@ -1086,8 +1094,11 @@ func (b *diyBackend) RemoveStack(ctx context.Context, stack backend.Stack, force
 		return false, err
 	}
 	defer b.Unlock(ctx, diyStackRef)
+	if err := b.recoverJournalForMutation(ctx, diyStackRef); err != nil {
+		return false, err
+	}
 
-	checkpoint, _, _, err := b.getCheckpoint(ctx, diyStackRef)
+	checkpoint, _, _, err := b.getCleanCheckpoint(ctx, diyStackRef)
 	if err != nil {
 		return false, err
 	}
@@ -1133,6 +1144,9 @@ func (b *diyBackend) renameStack(ctx context.Context, oldRef *diyBackendReferenc
 		return err
 	}
 	defer b.Unlock(ctx, oldRef)
+	if err := b.recoverJournalForMutation(ctx, oldRef); err != nil {
+		return err
+	}
 
 	// Ensure the destination stack does not already exist.
 	hasExisting, err := b.bucket.Exists(ctx, b.stackPath(ctx, newRef))
@@ -1144,7 +1158,7 @@ func (b *diyBackend) renameStack(ctx context.Context, oldRef *diyBackendReferenc
 	}
 
 	// Get the current state from the stack to be renamed.
-	chk, version, features, err := b.getCheckpoint(ctx, oldRef)
+	chk, version, features, err := b.getCleanCheckpoint(ctx, oldRef)
 	if err != nil {
 		return fmt.Errorf("failed to load checkpoint: %w", err)
 	}
@@ -1224,6 +1238,9 @@ func (b *diyBackend) Update(ctx context.Context, stack backend.Stack,
 		return nil, err
 	}
 	defer b.Unlock(ctx, stack.Ref())
+	if err := b.recoverJournalForMutation(ctx, stack.Ref()); err != nil {
+		return nil, err
+	}
 
 	return backend.PreviewThenPromptThenExecute(ctx, apitype.UpdateUpdate, stack, op, b.apply, nil, events)
 }
@@ -1251,6 +1268,9 @@ func (b *diyBackend) Import(ctx context.Context, stack backend.Stack,
 		return nil, nil, err
 	}
 	defer b.Unlock(ctx, stack.Ref())
+	if err := b.recoverJournalForMutation(ctx, stack.Ref()); err != nil {
+		return nil, nil, err
+	}
 
 	return backend.PreviewThenPromptThenExecuteImport(ctx, stack, op, b.apply, nil)
 }
@@ -1276,6 +1296,9 @@ func (b *diyBackend) Refresh(ctx context.Context, stack backend.Stack,
 		return nil, err
 	}
 	defer b.Unlock(ctx, stack.Ref())
+	if err := b.recoverJournalForMutation(ctx, stack.Ref()); err != nil {
+		return nil, err
+	}
 
 	return backend.PreviewThenPromptThenExecute(ctx, apitype.RefreshUpdate, stack, op, b.apply, nil, nil)
 }
@@ -1301,6 +1324,9 @@ func (b *diyBackend) Destroy(ctx context.Context, stack backend.Stack,
 		return nil, err
 	}
 	defer b.Unlock(ctx, stack.Ref())
+	if err := b.recoverJournalForMutation(ctx, stack.Ref()); err != nil {
+		return nil, err
+	}
 
 	return backend.PreviewThenPromptThenExecute(ctx, apitype.DestroyUpdate, stack, op, b.apply, nil, nil)
 }
@@ -1348,6 +1374,36 @@ func (b *diyBackend) apply(
 		return nil, nil, nil, err
 	}
 
+	// Previews keep an in-memory snapshot with a discarding persister. Mutations use
+	// either the legacy checkpoint manager or an epoch-scoped durable journal.
+	var persister backend.SnapshotPersister
+	if kind == apitype.PreviewUpdate || opts.DryRun {
+		persister = backend.DiscardPersister{}
+	} else {
+		persister = b.newSnapshotPersister(ctx, diyStackRef)
+	}
+	var legacyManager *backend.SnapshotManager
+	var manager engine.SnapshotManager
+	var activeEpoch string
+	journaled := kind != apitype.PreviewUpdate && !opts.DryRun && b.Env.GetBool(env.DIYBackendJournaling)
+	if journaled {
+		m, journalErr := b.startJournal(ctx, diyStackRef)
+		if journalErr != nil {
+			return nil, nil, nil, journalErr
+		}
+		activeEpoch = m.Epoch
+		journaler := b.newDIYJournaler(ctx, diyStackRef, m, op.SecretsManager)
+		manager, err = engine.NewJournalSnapshotManagerWithVersion(
+			journaler, update.Target.Snapshot, op.SecretsManager, apitype.LatestJournalVersion)
+		if err != nil {
+			_ = journaler.Close()
+			return nil, nil, nil, err
+		}
+	} else {
+		legacyManager = backend.NewSnapshotManager(persister, op.SecretsManager, update.Target.Snapshot, nil)
+		manager = legacyManager
+	}
+
 	// Spawn a display loop to show events on the CLI.
 	displayEvents := make(chan engine.Event)
 	displayDone := make(chan bool)
@@ -1382,16 +1438,7 @@ func (b *diyBackend) apply(
 			StateMigrations: true,
 		},
 	}
-	// Create the snapshot manager. We always install one (even for preview and dry-run) so that
-	// the engine mutates an in-memory snapshot we can return to callers. For dry-run operations
-	// we substitute a discarding persister so nothing is written to disk.
-	var persister backend.SnapshotPersister
-	if kind == apitype.PreviewUpdate || opts.DryRun {
-		persister = backend.DiscardPersister{}
-	} else {
-		persister = b.newSnapshotPersister(ctx, diyStackRef)
-	}
-	manager := backend.NewSnapshotManager(persister, op.SecretsManager, update.Target.Snapshot, nil)
+
 	engineCtx.SnapshotManager = manager
 
 	if op.Opts.Engine.HostFactory == nil {
@@ -1433,9 +1480,12 @@ func (b *diyBackend) apply(
 	<-displayDone
 	scope.Close() // Don't take any cancellations anymore, we're shutting down.
 	close(engineEvents)
-	// Capture the final in-memory snapshot before closing the manager; Snap() reads the manager's
-	// resource list which is safe to call once the engine has returned.
-	snap := manager.Snap()
+	// Legacy managers expose their final in-memory snapshot. Journal managers must
+	// finish persistence and consolidate this run's epoch before state can be reloaded.
+	var snap *deploy.Snapshot
+	if legacyManager != nil {
+		snap = legacyManager.Snap()
+	}
 	err = manager.Close()
 	// If the snapshot manager failed to close, we should return that error.
 	// Even though all the parts of the operation have potentially succeeded, a
@@ -1443,13 +1493,21 @@ func (b *diyBackend) apply(
 	// operation/invocation (e.g. an invalid snapshot that fails integrity
 	// checks, or a failure to write that means the snapshot is incomplete).
 	// Reporting now should make debugging and reporting easier.
-	if err != nil {
-		return plan, changes, snap, fmt.Errorf("writing snapshot: %w", err)
+	if err == nil && journaled {
+		err = b.consolidateJournal(ctx, diyStackRef, activeEpoch)
+		if err == nil {
+			if _, _, _, err = b.getCleanCheckpoint(ctx, diyStackRef); err == nil {
+				snap, err = b.getSnapshot(ctx, op.SecretsProvider, diyStackRef)
+			}
+		}
 	}
 
 	// Make sure the goroutine writing to displayEvents and events has exited before proceeding.
 	<-eventsDone
 	close(displayEvents)
+	if err != nil {
+		return plan, changes, snap, errors.Join(updateErr, fmt.Errorf("writing snapshot: %w", err))
+	}
 
 	// Save update results.
 	backendUpdateResult := backend.SucceededResult
@@ -1553,7 +1611,7 @@ func (b *diyBackend) ExportDeployment(ctx context.Context,
 		return nil, err
 	}
 
-	chk, version, features, err := b.getCheckpoint(ctx, diyStackRef)
+	chk, version, features, err := b.getCleanCheckpoint(ctx, diyStackRef)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load checkpoint: %w", err)
 	}
@@ -1583,6 +1641,9 @@ func (b *diyBackend) ImportDeployment(ctx context.Context, stk backend.Stack,
 		return err
 	}
 	defer b.Unlock(ctx, diyStackRef)
+	if err := b.recoverJournalForMutation(ctx, diyStackRef); err != nil {
+		return err
+	}
 
 	stackName := diyStackRef.FullyQualifiedName()
 	chk, err := stack.MarshalUntypedDeploymentToVersionedCheckpointWithMarshaler(
