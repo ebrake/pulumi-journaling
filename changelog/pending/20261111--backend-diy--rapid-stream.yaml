@@ -1,4 +1,4 @@
 component: backend/diy
 kind: feat
-body: Support zonal Rapid GCS backends with atomic checkpoints and recoverable append-stream journals
+body: Support gcs_api=rapid with atomic checkpoints and one recoverable append stream per update, and document colocated low-latency storage
 time: 2026-11-11T00:00:00Z

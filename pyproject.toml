@@ -26,7 +26,7 @@ classifiers = [
 
 [project.urls]
 Homepage = "https://github.com/ebrake/pulumi-journaling"
-Documentation = "https://github.com/ebrake/pulumi-journaling/blob/journaling/docs/diy-journaling.md"
+Documentation = "https://github.com/ebrake/pulumi-journaling/blob/main/docs/diy-journaling.md"
 Source = "https://github.com/ebrake/pulumi-journaling"
 Issues = "https://github.com/ebrake/pulumi-journaling/issues"
 Upstream = "https://github.com/pulumi/pulumi"
