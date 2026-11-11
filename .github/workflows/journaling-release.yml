@@ -12,12 +12,17 @@ on:
         type: boolean
         default: false
 
+      publish_prebuilt:
+        description: Publish already validated bundles from the version's draft release
+        type: boolean
+        default: false
+
 permissions:
   contents: read
 
 jobs:
   test:
-    if: github.repository == 'ebrake/pulumi-journaling' && github.ref == 'refs/heads/journaling'
+    if: github.repository == 'ebrake/pulumi-journaling' && github.ref == 'refs/heads/journaling' && !inputs.publish_prebuilt
     uses: ./.github/workflows/journaling-test.yml
 
   build:
@@ -131,3 +136,75 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086
         with:
           packages-dir: release/dist/
+
+  prebuilt:
+    if: github.repository == 'ebrake/pulumi-journaling' && github.ref == 'refs/heads/journaling' && inputs.publish_prebuilt && inputs.publish_github && inputs.publish_pypi
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with:
+          python-version: '3.14'
+      - name: Download and verify reviewed release artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p metadata dist
+          gh api repos/ebrake/pulumi-journaling/releases > metadata/releases.json
+          python - <<'VERIFY'
+          import email
+          import hashlib
+          import json
+          import subprocess
+          import urllib.parse
+          import zipfile
+          from pathlib import Path
+          config = json.loads(Path("journaling-release.json").read_text())
+          releases = json.loads(Path("metadata/releases.json").read_text())
+          release = next(item for item in releases if item["tag_name"] == "v" + config["version"])
+          Path("metadata/release-info.json").write_text(json.dumps(release))
+          for asset in release["assets"]:
+              name = asset["name"]
+              if name != "pulumi-cli.json" and not (name.startswith("pulumi_journaling-") and name.endswith((".whl", ".tar.gz"))):
+                  continue
+              assert Path(name).name == name
+              destination = Path("metadata" if name == "pulumi-cli.json" else "dist") / name
+              with destination.open("wb") as stream:
+                  subprocess.run(["gh", "api", "-H", "Accept: application/octet-stream", f"repos/ebrake/pulumi-journaling/releases/assets/{asset['id']}"], stdout=stream, check=True)
+          manifest = json.loads(Path("metadata/pulumi-cli.json").read_text())
+          assert manifest["version"] == config["version"]
+          assert manifest["upstreamVersion"] == config["upstreamVersion"]
+          assert manifest["repository"] == "ebrake/pulumi-journaling"
+          assert manifest["sourceCommit"] == release["target_commitish"]
+          assert set(manifest["artifacts"]) == set(config["upstreamArchives"])
+          assets = {asset["name"]: asset for asset in release["assets"]}
+          for artifact in manifest["artifacts"].values():
+              name = urllib.parse.urlparse(artifact["url"]).path.rsplit("/", 1)[-1]
+              assert assets[name]["digest"] == "sha256:" + artifact["sha256"]
+              expected = f"https://github.com/ebrake/pulumi-journaling/releases/download/{release['tag_name']}/{name}"
+              assert urllib.parse.unquote(artifact["url"]) == expected
+          for path in Path("dist").iterdir():
+              assert assets[path.name]["digest"] == "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+          wheel = next(Path("dist").glob("*.whl"))
+          with zipfile.ZipFile(wheel) as package:
+              assert json.loads(package.read("pulumi_journaling/release.json")) == manifest
+              metadata = email.message_from_bytes(package.read(next(name for name in package.namelist() if name.endswith(".dist-info/METADATA"))))
+              assert metadata["Name"] == "pulumi-journaling"
+              assert metadata["Version"] == config["pythonVersion"]
+          print("Verified all platform hashes and Python distribution provenance:", manifest["sourceCommit"])
+          VERIFY
+          python -m pip install twine
+          python -m twine check --strict dist/*
+      - name: Publish the verified GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          RELEASE_ID=$(python -c 'import json; print(json.load(open("metadata/release-info.json"))["id"])')
+          gh api --method PATCH "repos/ebrake/pulumi-journaling/releases/$RELEASE_ID" -F draft=false --jq .html_url
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086
+        with:
+          packages-dir: dist/
