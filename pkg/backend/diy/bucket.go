@@ -19,7 +19,8 @@ package diy
 import (
 	"bytes"
 	"context"
-	"crypto/md5"
+	"crypto/md5" //nolint:gosec // Azure Content-MD5 is a transport checksum, not a security primitive.
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -150,9 +151,9 @@ func (b *wrappedBucket) WriteAll(ctx context.Context, key string, p []byte, opts
 	if opts != nil {
 		options = *opts
 	}
-	sum := md5.Sum(p)
+	sum := md5.Sum(p) //nolint:gosec // Azure Content-MD5 is a transport checksum, not a security primitive.
 	if len(options.ContentMD5) != 0 && !bytes.Equal(options.ContentMD5, sum[:]) {
-		return fmt.Errorf("Azure upload content does not match the supplied MD5")
+		return errors.New("Azure upload content does not match the supplied MD5")
 	}
 	// CDK's MD5 option disables driver.Upload, exposing azureblob's pipe-close race on errors.
 	// Validate locally, then let Azure validate every transferred block with CRC64.
@@ -169,7 +170,7 @@ func (b *wrappedBucket) WriteAll(ctx context.Context, key string, p []byte, opts
 		}
 		var upload *azblob.UploadStreamOptions
 		if !as(&upload) {
-			return fmt.Errorf("Azure upload options unavailable")
+			return errors.New("Azure upload options unavailable")
 		}
 		if upload.HTTPHeaders == nil {
 			upload.HTTPHeaders = &azureblob.HTTPHeaders{}

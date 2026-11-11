@@ -547,11 +547,11 @@ func (w *postgresWriter) Close() error {
 	args := []any{w.key, string(jsonData)}
 	conditional := w.opts.IfNotExist || w.conditions.IfMatch != nil
 	if w.conditions.IfMatch != nil {
-		query = fmt.Sprintf( //nolint:gosec // The table identifier comes from the backend configuration.
+		query = fmt.Sprintf(
 			"UPDATE %s SET data = $2, updated_at = now() WHERE key = $1 AND data::text = $3", w.bucket.tableName)
 		args = append(args, string(*w.conditions.IfMatch))
 	} else if w.opts.IfNotExist {
-		query = fmt.Sprintf( //nolint:gosec // The table identifier comes from the backend configuration.
+		query = fmt.Sprintf(
 			"INSERT INTO %s (key, data) VALUES ($1, $2) ON CONFLICT (key) DO NOTHING", w.bucket.tableName)
 	}
 	result, err := w.bucket.db.ExecContext(w.ctx, query, args...)

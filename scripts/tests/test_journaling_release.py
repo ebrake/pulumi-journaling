@@ -11,8 +11,16 @@ from pathlib import Path
 SPEC = importlib.util.spec_from_file_location(
     "journaling_release", Path(__file__).parents[1] / "journaling-release.py"
 )
+assert SPEC is not None and SPEC.loader is not None
 release = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(release)
+
+
+def read_member(bundle, name):
+    stream = bundle.extractfile(name)
+    assert stream is not None
+    with stream:
+        return stream.read()
 
 
 class ReleaseTests(unittest.TestCase):
@@ -40,15 +48,15 @@ class ReleaseTests(unittest.TestCase):
             target = root / "fork.tar.gz"
             release.repack(source, binary, target, {"sourceCommit": "a" * 40})
             with tarfile.open(target) as bundle:
-                self.assertEqual(bundle.extractfile("pulumi/pulumi").read(), b"fork")
+                self.assertEqual(read_member(bundle, "pulumi/pulumi"), b"fork")
                 self.assertEqual(
-                    bundle.extractfile("pulumi/pulumi-language-python").read(),
+                    read_member(bundle, "pulumi/pulumi-language-python"),
                     b"matching-host",
                 )
                 self.assertEqual(
-                    json.load(bundle.extractfile("pulumi/journaling-provenance.json"))[
-                        "sourceCommit"
-                    ],
+                    json.loads(
+                        read_member(bundle, "pulumi/journaling-provenance.json")
+                    )["sourceCommit"],
                     "a" * 40,
                 )
             second = root / "second.tar.gz"
