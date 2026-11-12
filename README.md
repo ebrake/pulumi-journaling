@@ -7,20 +7,69 @@ This project is independently maintained and is not affiliated with, sponsored b
 ## Install
 
 ```sh
-python -m pip install pulumi-journaling
+python -m pip install pulumi-journaling==3.275.0.post1
 pulumi-journaling version
 ```
 
 The Python distribution provides both `pulumi-journaling` and `pulumi` commands, plus the matching upstream Python SDK, so existing `import pulumi` programs continue to work. On first invocation, the launcher downloads the matching CLI and language hosts from this fork's [GitHub releases](https://github.com/ebrake/pulumi-journaling/releases), verifies the SHA-256 checksum embedded in the Python package, and caches the bundle. That first invocation requires network access. Set `PULUMI_JOURNALING_CACHE` to choose the cache directory. Linux and macOS on x86-64 and ARM64 are supported; Windows packages are not currently published.
 
-The Python launcher enables DIY journaling by default. Existing Pulumi commands and backend URLs continue to work:
+## Use journaling
+
+The Python launcher enables journaling automatically for every DIY backend. Check that `pulumi version` includes `+journaling` so your shell is using this fork. You can also use `pulumi-journaling` in place of `pulumi` in every command below.
+
+From an existing Pulumi project, log in to your state backend, select an existing stack, and deploy normally:
 
 ```sh
+pulumi version
 pulumi login 's3://my-state-bucket'
+pulumi stack select organization/my-project/dev
+pulumi preview
 pulumi up
 ```
 
-Set `PULUMI_DIY_BACKEND_JOURNALING=false` to stop creating new journal epochs. Recovery of an unfinished epoch still runs before a mutating operation. Standalone GitHub bundles require `PULUMI_DIY_BACKEND_JOURNALING=true` to opt in. Pulumi Cloud retains its upstream service-managed persistence and journaling behavior.
+Replace the backend URL and stack name with your own. Create the bucket, container or database and configure its usual credentials before logging in. Supported backend URLs include:
+
+| State storage | Example backend URL |
+| --- | --- |
+| Local files | `file:///absolute/path/to/state` |
+| Amazon S3 or compatible storage | `s3://my-state-bucket` |
+| Google Cloud Storage | `gs://my-state-bucket` |
+| Azure Blob Storage | `azblob://my-state-container` |
+| PostgreSQL | `postgres://user:password@host:5432/database?sslmode=require` |
+
+For the standalone CLI downloaded from GitHub releases, enable journaling in the shell or CI job that runs Pulumi:
+
+```sh
+export PULUMI_DIY_BACKEND_JOURNALING=true
+pulumi up
+```
+
+Mutating operations such as `up`, `refresh`, and `destroy` record recoverable changes under the backend's `.pulumi/journal/` prefix. A successful operation consolidates them into the normal checkpoint and clears the active journal. Previews and other read-only commands see the last clean checkpoint while an update is unfinished. Pulumi Cloud retains its upstream service-managed persistence and journaling behavior.
+
+### Recover after an interrupted update
+
+The next mutating operation automatically recovers an unfinished journal before loading state. To recover explicitly without invoking resource providers:
+
+```sh
+pulumi state journal recover --stack organization/my-project/dev
+pulumi preview --stack organization/my-project/dev
+```
+
+If the previous process crashed and left a lock, first verify that process has stopped, then run `pulumi cancel --stack organization/my-project/dev` to remove its stale lock before recovery. Review the preview and resume deployment normally; provider-side effects from an interrupted operation may still need normal Pulumi reconciliation.
+
+If recovery refuses corrupt or unexplained state, preserve the evidence and consult the [recovery guide](https://github.com/ebrake/pulumi-journaling/blob/main/docs/diy-journaling.md) before using `pulumi state journal discard --yes`. Discarding can leave state missing changes from the interrupted operation.
+
+### Disable journaling
+
+To stop creating new journals for one command:
+
+```sh
+PULUMI_DIY_BACKEND_JOURNALING=false pulumi up
+```
+
+Use `export PULUMI_DIY_BACKEND_JOURNALING=false` to disable new journals for the shell or CI job. Unfinished journals still recover before mutating operations. Complete recovery before changing to an upstream CLI or another fork. Clean snapshots and provider packages retain upstream contracts.
+
+Pulumi 3.275.0 requires project-scoped DIY state. If you still use legacy non-project state, use Pulumi 3.274.1 or `pulumi-journaling==3.274.1.post2` to run `pulumi state upgrade` before installing this release.
 
 ## Rapid GCS and storage latency
 
@@ -56,18 +105,6 @@ DIY journaling is based on **Jason Rowsell's prototype in [Pulumi PR #22074](htt
 - Fault-injection, cancellation, durability-ordering, concurrent-reader, recovery and storage-driver tests; version-pinned CLI bundles and a checksummed Python launcher
 
 See the [journaling and recovery guide](https://github.com/ebrake/pulumi-journaling/blob/main/docs/diy-journaling.md) for operational details and tradeoffs. S3-compatible services must implement conditional writes and strongly consistent reads and listings. An endpoint that rejects required preconditions fails the operation; the CLI does not fall back to unconditional checkpoint replacement.
-
-## Recovery
-
-```sh
-pulumi state journal recover --stack organization/project/stack
-```
-
-Recovery invokes no resource providers. If the previous process crashed, first verify it has stopped, then remove its stale native lock with `pulumi cancel`. If recovery refuses corrupt or unexplained state, preserve the evidence and consult the [recovery guide](https://github.com/ebrake/pulumi-journaling/blob/main/docs/diy-journaling.md) before using `pulumi state journal discard --yes`.
-
-Complete recovery before changing to an upstream CLI or another fork. Clean snapshots and provider packages retain upstream contracts.
-
-Pulumi 3.275.0 requires project-scoped DIY state. If you still use legacy non-project state, use Pulumi 3.274.1 or `pulumi-journaling==3.274.1.post2` to run `pulumi state upgrade` before installing this release.
 
 ## Development and releases
 
