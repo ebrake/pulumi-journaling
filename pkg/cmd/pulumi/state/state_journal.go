@@ -17,10 +17,12 @@
 package state
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 
+	"github.com/pulumi/pulumi/pkg/v3/backend"
 	"github.com/pulumi/pulumi/pkg/v3/backend/display"
 	"github.com/pulumi/pulumi/pkg/v3/backend/diy"
 	cmdBackend "github.com/pulumi/pulumi/pkg/v3/cmd/pulumi/backend"
@@ -30,6 +32,15 @@ import (
 	"github.com/pulumi/pulumi/sdk/v3/go/common/workspace"
 	"github.com/spf13/cobra"
 )
+
+// recoverJournalBeforeEdit consolidates any unfinished DIY journal under the stack lock. State commands load a
+// snapshot, edit it and write it back, so a snapshot read before recovery would overwrite the recovered state.
+func recoverJournalBeforeEdit(ctx context.Context, s backend.Stack) error {
+	if lb, ok := s.Backend().(diy.Backend); ok {
+		return lb.RecoverJournal(ctx, s.Ref())
+	}
+	return nil
+}
 
 // newStateJournalCommand exposes provider-free recovery and explicit evidence-preserving discard.
 func newStateJournalCommand(ws pkgWorkspace.Context, lm cmdBackend.LoginManager) *cobra.Command {
@@ -77,7 +88,17 @@ func newStateJournalCommand(ws pkgWorkspace.Context, lm cmdBackend.LoginManager)
 						"State may be missing changes from the interrupted run; run pulumi refresh")
 					return err
 				}
-				return lb.RecoverJournal(cmd.Context(), ref)
+				if err := lb.RecoverJournal(cmd.Context(), ref); err != nil {
+					return err
+				}
+				// RecoverJournal does nothing when no manifest exists, so a guard that lost its manifest would
+				// otherwise look recovered.
+				if v, ok := lb.(interface {
+					VerifyJournalRecovered(context.Context, backend.StackReference) error
+				}); ok {
+					return v.VerifyJournalRecovered(cmd.Context(), ref)
+				}
+				return nil
 			},
 		}
 		action.Flags().StringVarP(&stackName, "stack", "s", "", "Stack to manage")

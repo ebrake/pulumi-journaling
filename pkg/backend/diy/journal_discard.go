@@ -68,9 +68,11 @@ func (b *diyBackend) DiscardJournal(ctx context.Context, stackRef backend.StackR
 	}
 	epoch := id.String()
 	var m journalManifest
+	validEpoch := false
 	if json.Unmarshal(manifest, &m) == nil {
 		if _, err := uuid.FromString(m.Epoch); err == nil {
 			epoch = m.Epoch
+			validEpoch = true
 		}
 	}
 	archive := path.Join(ref.BackupDir(), "journal-discarded", epoch)
@@ -87,7 +89,7 @@ func (b *diyBackend) DiscardJournal(ctx context.Context, stackRef backend.StackR
 		if err != nil {
 			return err
 		}
-		data, err := b.bucket.ReadAll(ctx, obj.Key)
+		data, err := b.readJournalObject(ctx, obj.Key)
 		if err != nil {
 			return err
 		}
@@ -97,10 +99,19 @@ func (b *diyBackend) DiscardJournal(ctx context.Context, stackRef backend.StackR
 		keys = append(keys, obj.Key)
 	}
 	if guarded {
-		cp.Features = slices.DeleteFunc(cp.Features, func(f string) bool { return f == diyJournalFeature })
-		clean, err := encodeJournalCheckpoint(cp, current)
-		if err != nil {
-			return err
+		var clean []byte
+		if validEpoch && m.Checkpoint == key {
+			// The base is the exact pre-run checkpoint, so restoring it avoids re-encoding a shallow decode of the
+			// guard, which cannot represent checkpoints older than v3. journalBase verifies its hash.
+			clean, _ = b.journalBase(ctx, ref, &m)
+		}
+		if clean == nil {
+			// Without a verified base, the best remaining option is to drop only the temporary feature.
+			cp.Features = slices.DeleteFunc(cp.Features, func(f string) bool { return f == diyJournalFeature })
+			clean, err = encodeJournalCheckpoint(cp, current)
+			if err != nil {
+				return err
+			}
 		}
 		if err := b.journalWrite(ctx, key, clean, journalHash(current)); err != nil {
 			return err

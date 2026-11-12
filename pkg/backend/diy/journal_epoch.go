@@ -31,6 +31,7 @@ import (
 	"github.com/gofrs/uuid"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/pulumi/pulumi/pkg/v3/resource/stack"
 	"github.com/pulumi/pulumi/sdk/v3/go/common/apitype"
 	"github.com/pulumi/pulumi/sdk/v3/go/common/encoding"
 )
@@ -64,12 +65,37 @@ func (b *diyBackend) journalManifest(ctx context.Context, ref *diyBackendReferen
 		decoded, err := hex.DecodeString(hash)
 		return err == nil && len(decoded) == 32
 	}
+	// The checkpoint key is checked for shape only, to avoid a bucket listing on every read. Callers that write to it
+	// must also confirm it is the current checkpoint (see consolidateManifest).
 	validVersion := (m.Version == 2 && m.Format == "") || (m.Version == 3 && m.Format == rapidJournalFormat)
 	if !validVersion || m.Stack != string(ref.FullyQualifiedName()) ||
-		!validHash(m.BaseHash) || !validHash(m.GuardHash) || m.Checkpoint != b.stackPath(ctx, ref) {
+		!validHash(m.BaseHash) || !validHash(m.GuardHash) || !isStackCheckpointKey(ref, m.Checkpoint) {
 		return nil, errors.New("journal manifest identity, version or checkpoint mismatch; preserving journal")
 	}
 	return &m, nil
+}
+
+// errGuardWithoutManifest describes a checkpoint guard whose journal is gone. Nothing can be replayed, so the only way
+// forward is the explicit, evidence-preserving discard.
+func errGuardWithoutManifest(ref *diyBackendReference) error {
+	return fmt.Errorf("%s checkpoint has no active journal manifest, so its interrupted run cannot be replayed; "+
+		"run pulumi state journal discard --stack %s --yes to archive the evidence and remove the guard",
+		diyJournalFeature, ref)
+}
+
+// unfinishedJournalError explains a strict read that met a guarded checkpoint: either another process still holds the
+// stack, or a crashed run needs recovery.
+func (b *diyBackend) unfinishedJournalError(ctx context.Context, ref *diyBackendReference) error {
+	if err := b.checkForLock(ctx, ref); err != nil {
+		return fmt.Errorf("%s has an unfinished journal and the stack is not available to recover it; "+
+			"wait for the running operation to finish, then run pulumi state journal recover --stack %s: %w",
+			ref, ref, err)
+	}
+	if m, err := b.journalManifest(ctx, ref); err == nil && m == nil {
+		return errGuardWithoutManifest(ref)
+	}
+	return fmt.Errorf(
+		"unfinished journal; run pulumi state journal recover --stack %s (or explicitly discard it)", ref)
 }
 
 func (b *diyBackend) requireCleanJournal(ctx context.Context, ref *diyBackendReference) error {
@@ -84,6 +110,11 @@ func (b *diyBackend) requireCleanJournal(ctx context.Context, ref *diyBackendRef
 }
 
 func (b *diyBackend) journalBase(ctx context.Context, ref *diyBackendReference, m *journalManifest) ([]byte, error) {
+	if cached, ok := b.journalBases.Load(m.Epoch); ok {
+		if base := cached.([]byte); journalHash(base) == m.BaseHash {
+			return base, nil
+		}
+	}
 	base, err := b.bucket.ReadAll(ctx, path.Join(b.journalDir(ref), m.Epoch, "base"))
 	if err != nil {
 		return nil, err
@@ -114,10 +145,17 @@ func (b *diyBackend) startJournal(ctx context.Context, ref *diyBackendReference)
 		return nil, err
 	}
 	if slices.Contains(cp.Features, diyJournalFeature) {
-		return nil, errors.New("guarded checkpoint has no journal manifest")
+		return nil, errGuardWithoutManifest(ref)
 	}
 	if encoding.DetectCompression(base) != b.compression {
-		if _, _, err := b.saveCheckpoint(ctx, ref, cp); err != nil {
+		normalized := cp
+		if cp.Version < 3 {
+			// The shallow decode cannot carry a pre-v3 payload through a rewrite.
+			if normalized, err = b.migrateJournalCheckpoint(ref, base); err != nil {
+				return nil, err
+			}
+		}
+		if _, _, err := b.saveCheckpoint(ctx, ref, normalized); err != nil {
 			return nil, err
 		}
 		key = b.stackPath(ctx, ref)
@@ -127,6 +165,13 @@ func (b *diyBackend) startJournal(ctx context.Context, ref *diyBackendReference)
 		}
 		cp, err = decodeJournalCheckpoint(base)
 		if err != nil {
+			return nil, err
+		}
+	}
+	if cp.Version < 3 {
+		// base keeps its original bytes, which every reader parses by version. The guard must instead carry a v3
+		// payload, because forcing the latest version onto a pre-v3 payload would misread or erase the state.
+		if cp, err = b.migrateJournalCheckpoint(ref, base); err != nil {
 			return nil, err
 		}
 	}
@@ -148,26 +193,50 @@ func (b *diyBackend) startJournal(ctx context.Context, ref *diyBackendReference)
 		m.Version = 3
 		m.Format = rapidJournalFormat
 	}
-	if err := b.journalPut(ctx, path.Join(b.journalDir(ref), m.Epoch, "base"), base); err != nil {
-		return nil, err
-	}
 	data, err := journalJSON(m)
 	if err != nil {
 		return nil, err
 	}
-	if err := b.journalPut(ctx, path.Join(b.journalDir(ref), "manifest.json"), data); err != nil {
+	// The backup and the base-then-manifest chain are independent, and both must finish before the guard is
+	// installed. Writing the backup from the bytes already in memory avoids a read-then-write copy.
+	var prepare errgroup.Group
+	prepare.SetLimit(b.getParallel())
+	prepare.Go(func() error {
+		if err := b.bucket.WriteAll(ctx, key+".bak", base, nil); err != nil {
+			return err
+		}
+		return b.journalSync(key + ".bak")
+	})
+	prepare.Go(func() error {
+		if err := b.journalPut(ctx, path.Join(b.journalDir(ref), m.Epoch, "base"), base); err != nil {
+			return err
+		}
+		return b.journalPut(ctx, path.Join(b.journalDir(ref), "manifest.json"), data)
+	})
+	if err := prepare.Wait(); err != nil {
 		return nil, err
 	}
-	if err := b.bucket.Copy(ctx, key+".bak", key, nil); err != nil {
-		return nil, err
-	}
-	if err := b.journalSync(key + ".bak"); err != nil {
-		return nil, err
-	}
+	b.journalBases.Store(m.Epoch, base)
 	if err := b.journalWrite(ctx, key, guard, m.BaseHash); err != nil {
 		return nil, err
 	}
 	return m, nil
+}
+
+// migrateJournalCheckpoint upgrades a pre-v3 checkpoint to the current versioned format without losing state.
+func (b *diyBackend) migrateJournalCheckpoint(
+	ref *diyBackendReference, data []byte,
+) (*apitype.VersionedCheckpoint, error) {
+	latest, version, features, err := stack.UnmarshalVersionedCheckpointToLatestCheckpoint(
+		encoding.Compress(encoding.JSON, encoding.DetectCompression(data)), data)
+	if err != nil {
+		return nil, err
+	}
+	if latest.Latest == nil {
+		latest.Latest = &apitype.DeploymentV3{}
+	}
+	return stack.DeploymentV3ToCheckpointWithMarshaler(diyJSONMarshaler, ref.FullyQualifiedName(),
+		latest.Latest, version, features)
 }
 
 // readJournalEntries reads the contiguous submitted prefix and sorts it by engine sequence for replay.

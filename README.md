@@ -7,7 +7,7 @@ This project is independently maintained and is not affiliated with, sponsored b
 ## Install
 
 ```sh
-python -m pip install pulumi-journaling==3.275.0.post1
+python -m pip install pulumi-journaling==3.275.0.post2
 pulumi-journaling version
 ```
 
@@ -69,7 +69,7 @@ PULUMI_DIY_BACKEND_JOURNALING=false pulumi up
 
 Use `export PULUMI_DIY_BACKEND_JOURNALING=false` to disable new journals for the shell or CI job. Unfinished journals still recover before mutating operations. Complete recovery before changing to an upstream CLI or another fork. Clean snapshots and provider packages retain upstream contracts.
 
-Pulumi 3.275.0 requires project-scoped DIY state. If you still use legacy non-project state, use Pulumi 3.274.1 or `pulumi-journaling==3.274.1.post2` to run `pulumi state upgrade` before installing this release.
+Pulumi 3.275.0 requires project-scoped DIY state. If you still use legacy non-project state, first recover any unfinished journals with the CLI that created them, then use Pulumi 3.274.1 or `pulumi-journaling==3.274.1.post2` to run `pulumi state upgrade`, and only then install this release. See [Upgrading legacy non-project state](https://github.com/ebrake/pulumi-journaling/blob/main/docs/diy-journaling.md#upgrading-legacy-non-project-state).
 
 ## Rapid GCS and storage latency
 
@@ -92,9 +92,36 @@ Keep verified checkpoint archives outside the bucket and exclude current state
 and active journals from lifecycle deletion. See the [Rapid transport guide](https://github.com/ebrake/pulumi-journaling/blob/main/docs/diy-journaling.md#rapid-gcs-transport).
 Other DIY backends retain their existing journal and recovery paths.
 
+## State persistence benchmarks
+
+Same-zone GCS Rapid measurements, in seconds: medians from three paired trials per row. Place runners close to state storage to minimize latency; remote storage will have different absolute timings.
+
+| Resources | Updated | Without journaling | With journaling | Speedup |
+|---:|---:|---:|---:|---:|
+| 24 | 1 | 1.83 | 1.88 | ≈1× |
+| 24 | 5 | 6.63 | 1.69 | 3.9× |
+| 24 | 10 | 12.92 | 1.83 | 7.0× |
+| 24 | 15 | 19.66 | 1.69 | 11.6× |
+| 91 | 1 | 1.87 | 1.85 | ≈1× |
+| 91 | 5 | 5.74 | 1.84 | 3.1× |
+| 91 | 10 | 12.23 | 2.15 | 5.7× |
+| 91 | 25 | 34.44 | 2.00 | 17.2× |
+| 91 | 50 | 71.36 | 2.12 | 33.7× |
+| 152 | 1 | 1.83 | 1.90 | ≈1× |
+| 152 | 5 | 6.65 | 1.87 | 3.6× |
+| 152 | 10 | 12.30 | 1.87 | 6.6× |
+| 152 | 25 | 32.24 | 1.77 | 18.2× |
+| 152 | 50 | 70.97 | 1.91 | 37.1× |
+
+These measure state persistence, including journal startup and consolidation, with simulated provider completions. CLI startup and provider execution are excluded. Actual deployment speedup depends on provider latency. All 84 final checkpoints passed state-equivalence, integrity, pending-operation and journal-cleanup checks.
+
+Traces show startup and consolidation dominate the remaining journaling time. These results do not change the benchmark qualification policy: automatic refresh journaling remains off, and the minimum stays at 10 mutations.
+
+[Full report and trace analysis](https://github.com/ebrake/pulumi-journaling/releases/download/v3.275.0%2Bjournaling.2/benchmark-report.md) · [CSV](https://github.com/ebrake/pulumi-journaling/releases/download/v3.275.0%2Bjournaling.2/benchmark-results.csv)
+
 ## Basis and hardening
 
-DIY journaling is based on **Jason Rowsell's prototype in [Pulumi PR #22074](https://github.com/pulumi/pulumi/pull/22074)**. but hardened and extended that basis with:
+DIY journaling is based on **Jason Rowsell's prototype in [Pulumi PR #22074](https://github.com/pulumi/pulumi/pull/22074)**, hardened and extended with:
 
 - Encrypted immutable entries, bounded asynchronous writes, and acknowledgements that wait for the entire submitted prefix to become durable
 - Epoch identity, checkpoint hashes and required-feature guards that prevent stock clients from consuming an unfinished journal
@@ -111,3 +138,9 @@ See the [journaling and recovery guide](https://github.com/ebrake/pulumi-journal
 The [release configuration](https://github.com/ebrake/pulumi-journaling/blob/main/journaling-release.json) pins the upstream commit and archive checksums. The [validation workflow](https://github.com/ebrake/pulumi-journaling/blob/main/.github/workflows/journaling-test.yml) runs regression tests, linters, lifecycle tests and the actual file, GCS, S3, Azure and PostgreSQL storage drivers against isolated local emulators. The [release workflow](https://github.com/ebrake/pulumi-journaling/blob/main/.github/workflows/journaling-release.yml) builds all four platform bundles, exercises the CLI, packages the launcher with the resulting checksums, and can publish to GitHub and PyPI. When hosted runners are unavailable, its prebuilt option accepts a reviewed draft release, verifies all platform and Python-package checksums and common source provenance, then publishes through the same trusted publisher.
 
 The upstream [contributing guide](https://github.com/ebrake/pulumi-journaling/blob/main/CONTRIBUTING.md) covers the Go monorepo. Report fork issues in [this repository](https://github.com/ebrake/pulumi-journaling/issues). See [authors](https://github.com/ebrake/pulumi-journaling/blob/main/AUTHORS.md), [notices](https://github.com/ebrake/pulumi-journaling/blob/main/NOTICE) and the [Apache 2.0 license](https://github.com/ebrake/pulumi-journaling/blob/main/LICENSE).
+
+See [CHANGELOG-FORK.md](CHANGELOG-FORK.md) for fork releases and links to the corresponding upstream Pulumi changes.
+
+## OSS or Pulumi Cloud?
+
+OSS with a DIY backend is enough for individuals and teams comfortable managing storage access, backups and recovery. [Pulumi Cloud](https://www.pulumi.com/docs/iac/concepts/pulumi-cloud/) removes that operational work and adds managed collaboration, access controls, audit logs, policy enforcement and drift detection. It is a strong choice as team and governance needs grow; see [Pulumi Cloud vs. OSS](https://www.pulumi.com/docs/iac/guides/basics/pulumi-cloud-vs-oss/).

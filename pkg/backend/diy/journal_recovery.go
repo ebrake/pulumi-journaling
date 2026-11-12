@@ -73,6 +73,10 @@ func (b *diyBackend) prepareJournal(ctx context.Context, ref *diyBackendReferenc
 		if e.Kind == apitype.JournalEntryKindWrite {
 			baseCount = len(e.NewSnapshot.Resources)
 		}
+		// A migration replaces the replayer's base with the layout, so later base indices refer to it.
+		if e.Kind == apitype.JournalEntryKindStateMigration {
+			baseCount = len(e.Layout)
+		}
 		if e.Kind == apitype.JournalEntryKindRebuiltBaseState {
 			rebuilt, err := replayer.GenerateDeployment()
 			if err != nil {
@@ -121,6 +125,13 @@ func (b *diyBackend) consolidateJournal(ctx context.Context, ref *diyBackendRefe
 	if err != nil {
 		return err
 	}
+	return b.consolidateManifest(ctx, ref, m, wantEpoch)
+}
+
+// consolidateManifest is consolidateJournal for a caller that already read the manifest.
+func (b *diyBackend) consolidateManifest(
+	ctx context.Context, ref *diyBackendReference, m *journalManifest, wantEpoch string,
+) error {
 	if wantEpoch != "" && (m == nil || m.Epoch != wantEpoch) {
 		return fmt.Errorf(
 			"journal epoch %s was recovered or replaced by another process; this run's state may be incomplete",
@@ -129,14 +140,25 @@ func (b *diyBackend) consolidateJournal(ctx context.Context, ref *diyBackendRefe
 	if m == nil {
 		return nil
 	}
+	// journalManifest checks only that the checkpoint key has the right shape. Writing to a stale compression variant
+	// would republish old state as the newest checkpoint, so writers confirm it is the one readers select.
+	if key := b.stackPath(ctx, ref); m.Checkpoint != key {
+		return fmt.Errorf("journal manifest checkpoint %s is not the current checkpoint %s for %s; preserving journal",
+			m.Checkpoint, key, ref)
+	}
 	current, err := b.bucket.ReadAll(ctx, m.Checkpoint)
 	if err != nil {
 		return err
 	}
 	dir := path.Join(b.journalDir(ref), m.Epoch)
-	clean, err := b.journalRead(ctx, path.Join(dir, "clean"))
-	if err != nil {
-		return err
+	// A prepared clean checkpoint can exist only if an earlier consolidation of this epoch was interrupted. The run
+	// that created the epoch consolidates it first, so it can skip the read; recovery still looks.
+	var clean []byte
+	if wantEpoch == "" {
+		clean, err = b.journalRead(ctx, path.Join(dir, "clean"))
+		if err != nil {
+			return err
+		}
 	}
 	currentHash := journalHash(current)
 	if currentHash == m.BaseHash && clean == nil {
@@ -195,19 +217,19 @@ func (b *diyBackend) consolidateJournal(ctx context.Context, ref *diyBackendRefe
 
 func (b *diyBackend) clearJournal(ctx context.Context, ref *diyBackendReference, m *journalManifest) error {
 	dir := path.Join(b.journalDir(ref), m.Epoch)
-	files, err := listBucket(ctx, b.bucket, path.Join(dir, "entries"))
-	if err != nil {
-		return err
-	}
-	if m.Format == rapidJournalFormat {
-		if err := b.journalDelete(ctx, path.Join(dir, "journal.stream")); err != nil {
-			return err
-		}
-	}
 	var group errgroup.Group
 	group.SetLimit(b.getParallel())
-	for _, f := range files {
-		group.Go(func() error { return b.journalDelete(ctx, f.Key) })
+	if m.Format == rapidJournalFormat {
+		// Rapid epochs hold one stream object, so there is no entries prefix to list.
+		group.Go(func() error { return b.journalDelete(ctx, path.Join(dir, "journal.stream")) })
+	} else {
+		files, err := listBucket(ctx, b.bucket, path.Join(dir, "entries"))
+		if err != nil {
+			return err
+		}
+		for _, f := range files {
+			group.Go(func() error { return b.journalDelete(ctx, f.Key) })
+		}
 	}
 	if err := group.Wait(); err != nil {
 		return err
@@ -216,7 +238,11 @@ func (b *diyBackend) clearJournal(ctx context.Context, ref *diyBackendReference,
 	if err := b.journalDelete(ctx, path.Join(b.journalDir(ref), "manifest.json")); err != nil {
 		return err
 	}
-	return errors.Join(b.journalDelete(ctx, path.Join(dir, "base")), b.journalDelete(ctx, path.Join(dir, "clean")))
+	b.journalBases.Delete(m.Epoch)
+	var tail errgroup.Group
+	tail.Go(func() error { return b.journalDelete(ctx, path.Join(dir, "base")) })
+	tail.Go(func() error { return b.journalDelete(ctx, path.Join(dir, "clean")) })
+	return tail.Wait()
 }
 
 func (b *diyBackend) journalDelete(ctx context.Context, key string) error {
@@ -247,10 +273,31 @@ func (b *diyBackend) RecoverJournal(ctx context.Context, stackRef backend.StackR
 	return b.consolidateJournal(ctx, ref, "")
 }
 
-func (b *diyBackend) recoverJournalForMutation(ctx context.Context, stackRef backend.StackReference) error {
+// recoverJournalForMutation consolidates an unfinished epoch under the caller's stack lock. It reports whether one
+// existed, because a caller that loaded state before recovering holds a snapshot that no longer matches the stack.
+// VerifyJournalRecovered fails if the stack is still guarded after RecoverJournal, which means the guard has lost its
+// manifest. RecoverJournal cannot tell, because telling would cost every mutating command a full checkpoint read.
+func (b *diyBackend) VerifyJournalRecovered(ctx context.Context, stackRef backend.StackReference) error {
 	ref, err := b.getReference(stackRef)
 	if err != nil {
 		return err
 	}
-	return b.consolidateJournal(ctx, ref, "")
+	if _, _, _, err := b.getCleanCheckpoint(ctx, ref); err != nil && gcerrors.Code(err) != gcerrors.NotFound {
+		return err
+	}
+	return nil
+}
+
+func (b *diyBackend) recoverJournalForMutation(
+	ctx context.Context, stackRef backend.StackReference,
+) (recovered bool, _ error) {
+	ref, err := b.getReference(stackRef)
+	if err != nil {
+		return false, err
+	}
+	m, err := b.journalManifest(ctx, ref)
+	if err != nil || m == nil {
+		return false, err
+	}
+	return true, b.consolidateManifest(ctx, ref, m, "")
 }

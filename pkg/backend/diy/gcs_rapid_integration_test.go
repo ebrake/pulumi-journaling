@@ -18,10 +18,10 @@ package diy
 
 import (
 	"context"
-	"fmt"
 	"net/url"
 	"os"
 	"path"
+	"strconv"
 	"testing"
 	"time"
 
@@ -48,7 +48,7 @@ func TestGCSRapidTransport(t *testing.T) {
 	u, err := url.Parse(prefix)
 	require.NoError(t, err)
 	require.Equal(t, "rapid", u.Query().Get("gcs_api"))
-	u.Path = path.Join(u.Path, fmt.Sprint(time.Now().UnixNano()))
+	u.Path = path.Join(u.Path, strconv.FormatInt(time.Now().UnixNano(), 10))
 	project := &workspace.Project{Name: tokens.PackageName("rapid-canary")}
 	b, err := newDIYBackend(t.Context(), diagtest.LogSink(t), u.String(), project, nil)
 	require.NoError(t, err)
@@ -58,18 +58,21 @@ func TestGCSRapidTransport(t *testing.T) {
 	second := []byte("replacement complete bytes")
 	key := "probe/checkpoint"
 	require.NoError(t, b.bucket.WriteAll(t.Context(), key, first, nil))
-	require.ErrorContains(t, b.bucket.WriteAll(t.Context(), key, second, &blob.WriterOptions{IfNotExist: true}), "condition")
+	err = b.bucket.WriteAll(t.Context(), key, second, &blob.WriterOptions{IfNotExist: true})
+	require.ErrorContains(t, err, "condition")
 	actual, err := b.bucket.ReadAll(t.Context(), key)
 	require.NoError(t, err)
 	require.Equal(t, first, actual)
 	require.NoError(t, b.journalWrite(t.Context(), key, second, journalHash(first)))
-	require.ErrorContains(t, b.journalWrite(t.Context(), key, first, journalHash(first)), "checkpoint changed unexpectedly")
-	require.ErrorContains(t, b.bucket.WriteAll(t.Context(), key, first, &blob.WriterOptions{BeforeWrite: func(as func(any) bool) error {
+	err = b.journalWrite(t.Context(), key, first, journalHash(first))
+	require.ErrorContains(t, err, "checkpoint changed unexpectedly")
+	err = b.bucket.WriteAll(t.Context(), key, first, &blob.WriterOptions{BeforeWrite: func(as func(any) bool) error {
 		var handle **storage.ObjectHandle
 		require.True(t, as(&handle))
 		*handle = (*handle).If(storage.Conditions{GenerationMatch: 1})
 		return nil
-	}}), "condition")
+	}})
+	require.ErrorContains(t, err, "condition")
 	actual, err = b.bucket.ReadAll(t.Context(), key)
 	require.NoError(t, err)
 	require.Equal(t, second, actual)
@@ -116,10 +119,10 @@ func TestGCSRapidJournalRecovery(t *testing.T) {
 	}
 	require.Contains(t, prefix, "/journal-canary/")
 	for _, pending := range []bool{false, true} {
-		t.Run(fmt.Sprint(pending), func(t *testing.T) {
+		t.Run(strconv.FormatBool(pending), func(t *testing.T) {
 			u, err := url.Parse(prefix)
 			require.NoError(t, err)
-			u.Path = path.Join(u.Path, fmt.Sprint(time.Now().UnixNano()))
+			u.Path = path.Join(u.Path, strconv.FormatInt(time.Now().UnixNano(), 10))
 			project := &workspace.Project{Name: tokens.PackageName("testproject")}
 			options := &diyBackendOptions{Env: env.NewEnv(env.MapStore{env.DIYBackendGzip.Var().Name(): "true"})}
 			b, err := newDIYBackend(t.Context(), diagtest.LogSink(t), u.String(), project, options)
@@ -130,7 +133,9 @@ func TestGCSRapidJournalRecovery(t *testing.T) {
 			require.NoError(t, err)
 			m, err := b.startJournal(t.Context(), ref)
 			require.NoError(t, err)
-			entry := apitype.JournalEntry{Version: 1, SequenceID: 1, OperationID: 1, Kind: apitype.JournalEntryKindSuccess, State: journalResource()}
+			entry := apitype.JournalEntry{
+				Version: 1, SequenceID: 1, OperationID: 1, Kind: apitype.JournalEntryKindSuccess, State: journalResource(),
+			}
 			if pending {
 				entry.Kind = apitype.JournalEntryKindBegin
 				entry.State = nil
@@ -139,20 +144,31 @@ func TestGCSRapidJournalRecovery(t *testing.T) {
 			frame, err := encodeRapidJournalFrame(entry)
 			require.NoError(t, err)
 			rapid := b.rapid
-			object := rapid.client.Bucket(rapid.name).Object(rapid.prefix + path.Join(b.journalDir(ref), m.Epoch, "journal.stream"))
-			writer := object.If(storage.Conditions{DoesNotExist: true}).NewWriter(t.Context())
+			key := path.Join(b.journalDir(ref), m.Epoch, "journal.stream")
+			object := rapid.client.Bucket(rapid.name).Object(rapid.prefix + key)
+			ctx, cancel := context.WithCancel(t.Context())
+			t.Cleanup(cancel)
+			writer := object.If(storage.Conditions{DoesNotExist: true}).NewWriter(ctx)
+			t.Cleanup(func() { _ = writer.Close() })
 			writer.Append = true
 			writer.FinalizeOnClose = false
-			_, err = writer.Write(append([]byte(rapidJournalMagic), frame...))
+			durable := append([]byte(rapidJournalMagic), frame...)
+			_, err = writer.Write(durable)
 			require.NoError(t, err)
 			_, err = writer.Flush()
 			require.NoError(t, err)
 			// A partially persisted next frame is unacknowledged and must not enter recovered state.
 			_, err = writer.Write(frame[:len(frame)/2])
 			require.NoError(t, err)
-			_, err = writer.Flush()
+			persisted, err := writer.Flush()
 			require.NoError(t, err)
-			require.NoError(t, writer.Close())
+			require.Equal(t, int64(len(durable)+len(frame)/2), persisted)
+			// A crashed writer cannot Close to refresh object metadata. Persisted bytes must remain readable even
+			// when the unfinalized object's metadata size is stale or zero.
+			cancel()
+			actual, err := rapid.readStream(t.Context(), key)
+			require.NoError(t, err)
+			require.Equal(t, append(durable, frame[:len(frame)/2]...), actual)
 			// Recovery opens a fresh backend, so no live journal manager or local cache can supply missing state.
 			recovered, err := newDIYBackend(t.Context(), diagtest.LogSink(t), u.String(), project, options)
 			require.NoError(t, err)

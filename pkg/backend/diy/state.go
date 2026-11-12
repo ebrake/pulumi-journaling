@@ -146,7 +146,24 @@ func (b *diyBackend) getSnapshot(ctx context.Context,
 	if err != nil {
 		return nil, fmt.Errorf("failed to load checkpoint: %w", err)
 	}
+	return b.snapshotFromCheckpoint(ctx, secretsProvider, checkpoint)
+}
 
+// getCleanSnapshot is getSnapshot for callers that must not observe guarded state: it reads the checkpoint once and
+// fails if an unfinished journal is still active.
+func (b *diyBackend) getCleanSnapshot(ctx context.Context,
+	secretsProvider secrets.Provider, ref *diyBackendReference,
+) (*deploy.Snapshot, error) {
+	checkpoint, _, _, err := b.getCleanCheckpoint(ctx, ref)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load checkpoint: %w", err)
+	}
+	return b.snapshotFromCheckpoint(ctx, secretsProvider, checkpoint)
+}
+
+func (b *diyBackend) snapshotFromCheckpoint(ctx context.Context,
+	secretsProvider secrets.Provider, checkpoint *apitype.CheckpointV3,
+) (*deploy.Snapshot, error) {
 	// Materialize an actual snapshot object.
 	snap, err := stack.DeserializeCheckpoint(ctx, secretsProvider, checkpoint)
 	if err != nil {
@@ -222,39 +239,42 @@ func (b *diyBackend) getCheckpointWithJournal(
 	if err != nil {
 		return nil, 0, nil, err
 	}
-	cp, err := decodeJournalCheckpoint(byts)
+	cp, version, features, err := unmarshalCheckpointBytes(byts)
+	// A guarded checkpoint carries a feature stock readers reject, so the one decode doubles as the guard check and
+	// ordinary reads never parse a checkpoint twice.
+	unsupported, ok := errors.AsType[*stack.ErrDeploymentUnsupportedFeatures](err)
+	if !ok || !slices.Contains(unsupported.Features, diyJournalFeature) {
+		return cp, version, features, err
+	}
+	if strict {
+		return nil, 0, nil, b.unfinishedJournalError(ctx, ref)
+	}
+	m, err := b.journalManifest(ctx, ref)
 	if err != nil {
 		return nil, 0, nil, err
 	}
-	if slices.Contains(cp.Features, diyJournalFeature) {
-		if strict {
-			return nil, 0, nil, fmt.Errorf(
-				"unfinished journal; run pulumi state journal recover --stack %s (or explicitly discard it)", ref)
+	var base []byte
+	if m != nil {
+		base, err = b.journalBase(ctx, ref, m)
+	}
+	if m == nil || err != nil {
+		// Consolidation may have completed between reading the guard and loading its base.
+		current, readErr := b.bucket.ReadAll(ctx, chkpath)
+		if readErr == nil && !bytes.Equal(byts, current) {
+			return b.getCheckpointWithJournal(ctx, ref, strict)
 		}
-		m, err := b.journalManifest(ctx, ref)
 		if err != nil {
 			return nil, 0, nil, err
 		}
-		var base []byte
-		if m != nil {
-			base, err = b.journalBase(ctx, ref, m)
-		}
-		if m == nil || err != nil {
-			// Consolidation may have completed between reading the guard and loading its base.
-			current, readErr := b.bucket.ReadAll(ctx, chkpath)
-			if readErr == nil && !bytes.Equal(byts, current) {
-				return b.getCheckpointWithJournal(ctx, ref, strict)
-			}
-			if err != nil {
-				return nil, 0, nil, err
-			}
-			return nil, 0, nil, fmt.Errorf("%s checkpoint has no active manifest; preserving state", diyJournalFeature)
-		}
-		if journalHash(byts) != m.GuardHash {
-			return nil, 0, nil, errors.New("guarded checkpoint hash mismatch; preserving journal")
-		}
-		byts = base
+		return nil, 0, nil, errGuardWithoutManifest(ref)
 	}
+	if journalHash(byts) != m.GuardHash {
+		return nil, 0, nil, errors.New("guarded checkpoint hash mismatch; preserving journal")
+	}
+	return unmarshalCheckpointBytes(base)
+}
+
+func unmarshalCheckpointBytes(byts []byte) (*apitype.CheckpointV3, int, []string, error) {
 	m := encoding.Compress(encoding.JSON, encoding.DetectCompression(byts))
 	return stack.UnmarshalVersionedCheckpointToLatestCheckpoint(m, byts)
 }

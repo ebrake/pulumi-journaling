@@ -1,0 +1,4 @@
+component: backend/diy
+kind: fix
+body: Recover flushed Rapid journal entries after a crash even when unfinalized object metadata reports a zero or stale size
+time: 2026-11-12T00:00:00Z

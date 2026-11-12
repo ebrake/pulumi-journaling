@@ -162,6 +162,11 @@ func (cmd *stateMoveCmd) Run(
 		cmd.ws = pkgWorkspace.Instance
 	}
 
+	for _, s := range []backend.Stack{source, dest} {
+		if err := recoverJournalBeforeEdit(ctx, s); err != nil {
+			return err
+		}
+	}
 	sourceSnapshot, err := source.Snapshot(ctx, sourceSecretsProvider)
 	if err != nil {
 		return err

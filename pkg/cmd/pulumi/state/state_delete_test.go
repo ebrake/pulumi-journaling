@@ -426,6 +426,7 @@ func TestStateDeleteDependency(t *testing.T) {
 	t.Parallel()
 
 	mockStack := &backend.MockStack{
+		BackendF: nonDIYBackend,
 		SnapshotF: func(ctx context.Context, secretsProvider secrets.Provider) (*deploy.Snapshot, error) {
 			return &deploy.Snapshot{
 				Resources: []*pkgresource.State{

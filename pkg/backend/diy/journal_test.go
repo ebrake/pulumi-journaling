@@ -111,52 +111,62 @@ func TestDIYJournalRecovery(t *testing.T) {
 	}
 }
 
+var errSimulatedCrash = errors.New("simulated process termination")
+
+// journalCrashBucket stops persisting at an exact operation boundary. A real crash ends every goroutine at once,
+// so once the boundary is reached every later operation fails without touching the bucket, whichever goroutine
+// issues it.
 type journalCrashBucket struct {
 	Bucket
 	mu        sync.Mutex
 	remaining int
 	after     bool
+	crashed   bool
 }
 
 func (b *journalCrashBucket) step(after bool) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if b.crashed {
+		return true
+	}
 	if b.after != after {
 		return false
 	}
 	b.remaining--
-	return b.remaining == 0
+	b.crashed = b.remaining == 0
+	return b.crashed
 }
 
 func (b *journalCrashBucket) WriteAll(ctx context.Context, key string, data []byte, opts *blob.WriterOptions) error {
 	if b.step(false) {
-		panic("simulated process termination")
+		return errSimulatedCrash
 	}
 	err := b.Bucket.WriteAll(ctx, key, data, opts)
 	if b.step(true) {
-		panic("simulated process termination")
+		return errSimulatedCrash
 	}
 	return err
 }
 
 func (b *journalCrashBucket) Copy(ctx context.Context, dst, src string, opts *blob.CopyOptions) error {
 	if b.step(false) {
-		panic("simulated process termination")
+		return errSimulatedCrash
 	}
 	err := b.Bucket.Copy(ctx, dst, src, opts)
 	if b.step(true) {
-		panic("simulated process termination")
+		return errSimulatedCrash
 	}
 	return err
 }
 
 func (b *journalCrashBucket) Delete(ctx context.Context, key string) error {
 	if b.step(false) {
-		return errors.New("simulated cleanup interruption")
+		return errSimulatedCrash
 	}
 	err := b.Bucket.Delete(ctx, key)
 	if b.step(true) {
-		return errors.New("simulated cleanup interruption")
+		return errSimulatedCrash
 	}
 	return err
 }
@@ -172,19 +182,25 @@ func TestDIYJournalCrashBoundaries(t *testing.T) {
 				faults := &journalCrashBucket{Bucket: original, remaining: boundary, after: after}
 				b.bucket = faults
 				func() {
-					defer func() {
-						if failure := recover(); failure != nil {
-							require.Equal(t, "simulated process termination", failure)
-						}
-					}()
+					crashed := func(err error) bool { return errors.Is(err, errSimulatedCrash) }
 					m, err := b.startJournal(t.Context(), ref)
+					if crashed(err) {
+						return
+					}
 					require.NoError(t, err)
-					writeDIYTestEntry(t, b, ref, m, apitype.JournalEntry{
+					data, err := json.Marshal(apitype.JournalEntry{
 						Version: 1, SequenceID: 1, OperationID: 1,
 						Kind: apitype.JournalEntryKindSuccess, State: journalResource(),
 					})
+					require.NoError(t, err)
+					key := path.Join(b.journalDir(ref), m.Epoch, "entries", fmt.Sprintf("%020d.journal.json", 1))
+					err = b.bucket.WriteAll(t.Context(), key, data, &blob.WriterOptions{IfNotExist: true})
+					if crashed(err) {
+						return
+					}
+					require.NoError(t, err)
 					if err := b.consolidateJournal(t.Context(), ref, ""); err != nil {
-						require.ErrorContains(t, err, "simulated cleanup interruption")
+						require.True(t, crashed(err), "unexpected consolidation error: %v", err)
 					}
 				}()
 				b.bucket = original

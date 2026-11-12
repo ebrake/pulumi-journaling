@@ -155,6 +155,9 @@ func (cmd *stateEditCmd) Run(ctx context.Context, s backend.Stack) error {
 		cmd.Stdin = os.Stdin
 	}
 
+	if err := recoverJournalBeforeEdit(ctx, s); err != nil {
+		return err
+	}
 	snap, err := s.Snapshot(ctx, cmdBackend.SecretsProvider(cmdBackend.DefaultLoginManager))
 	if err != nil {
 		return err

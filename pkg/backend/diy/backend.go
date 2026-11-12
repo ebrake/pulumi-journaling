@@ -127,6 +127,10 @@ type diyBackend struct {
 	rapid  *rapidBucket
 	mutex  sync.Mutex
 
+	// journalBases holds base checkpoints this process wrote, keyed by epoch. Entries are still checked against the
+	// manifest's BaseHash before use, so a stale entry cannot be trusted by mistake.
+	journalBases sync.Map
+
 	lockID string
 
 	compression encoding.Compression
@@ -343,6 +347,7 @@ func newDIYBackend(
 	if rapidClient != nil {
 		backend.rapid = wbucket.(*rapidBucket)
 	}
+	backend.bucket = traceBucket(backend.bucket)
 	backend.currentProject.Store(project)
 
 	// Read the Pulumi state metadata
@@ -1103,7 +1108,7 @@ func (b *diyBackend) RemoveStack(ctx context.Context, stack backend.Stack, force
 		return false, err
 	}
 	defer b.Unlock(ctx, diyStackRef)
-	if err := b.recoverJournalForMutation(ctx, diyStackRef); err != nil {
+	if _, err := b.recoverJournalForMutation(ctx, diyStackRef); err != nil {
 		return false, err
 	}
 
@@ -1153,7 +1158,7 @@ func (b *diyBackend) renameStack(ctx context.Context, oldRef *diyBackendReferenc
 		return err
 	}
 	defer b.Unlock(ctx, oldRef)
-	if err := b.recoverJournalForMutation(ctx, oldRef); err != nil {
+	if _, err := b.recoverJournalForMutation(ctx, oldRef); err != nil {
 		return err
 	}
 
@@ -1247,7 +1252,7 @@ func (b *diyBackend) Update(ctx context.Context, stack backend.Stack,
 		return nil, err
 	}
 	defer b.Unlock(ctx, stack.Ref())
-	if err := b.recoverJournalForMutation(ctx, stack.Ref()); err != nil {
+	if _, err := b.recoverJournalForMutation(ctx, stack.Ref()); err != nil {
 		return nil, err
 	}
 
@@ -1277,7 +1282,7 @@ func (b *diyBackend) Import(ctx context.Context, stack backend.Stack,
 		return nil, nil, err
 	}
 	defer b.Unlock(ctx, stack.Ref())
-	if err := b.recoverJournalForMutation(ctx, stack.Ref()); err != nil {
+	if _, err := b.recoverJournalForMutation(ctx, stack.Ref()); err != nil {
 		return nil, nil, err
 	}
 
@@ -1305,7 +1310,7 @@ func (b *diyBackend) Refresh(ctx context.Context, stack backend.Stack,
 		return nil, err
 	}
 	defer b.Unlock(ctx, stack.Ref())
-	if err := b.recoverJournalForMutation(ctx, stack.Ref()); err != nil {
+	if _, err := b.recoverJournalForMutation(ctx, stack.Ref()); err != nil {
 		return nil, err
 	}
 
@@ -1333,7 +1338,7 @@ func (b *diyBackend) Destroy(ctx context.Context, stack backend.Stack,
 		return nil, err
 	}
 	defer b.Unlock(ctx, stack.Ref())
-	if err := b.recoverJournalForMutation(ctx, stack.Ref()); err != nil {
+	if _, err := b.recoverJournalForMutation(ctx, stack.Ref()); err != nil {
 		return nil, err
 	}
 
@@ -1379,6 +1384,16 @@ func (b *diyBackend) apply(
 		// Print a banner so it's clear this is a diy deployment.
 		fmt.Printf(op.Opts.Display.Color.Colorize(
 			colors.SpecHeadline+"%s (%s):"+colors.Reset+"\n"), actionLabel, stackRef)
+	}
+
+	if kind == apitype.PreviewUpdate || opts.DryRun {
+		// Previews read the last clean checkpoint, which omits the changes of a crashed run until it is recovered.
+		if m, err := b.journalManifest(ctx, diyStackRef); err != nil {
+			logging.V(7).Infof("Unable to check %s for an unfinished journal: %v", diyStackRef, err)
+		} else if m != nil {
+			b.d.Warningf(diag.Message("", "%s has an unfinished journal, so this preview shows the state before "+
+				"the interrupted run; run `pulumi state journal recover --stack %s` first"), diyStackRef, diyStackRef)
+		}
 	}
 
 	// Start the update.
@@ -1509,9 +1524,7 @@ func (b *diyBackend) apply(
 	if err == nil && journaled {
 		err = b.consolidateJournal(ctx, diyStackRef, activeEpoch)
 		if err == nil {
-			if _, _, _, err = b.getCleanCheckpoint(ctx, diyStackRef); err == nil {
-				snap, err = b.getSnapshot(ctx, op.SecretsProvider, diyStackRef)
-			}
+			snap, err = b.getCleanSnapshot(ctx, op.SecretsProvider, diyStackRef)
 		}
 	}
 
@@ -1654,8 +1667,15 @@ func (b *diyBackend) ImportDeployment(ctx context.Context, stk backend.Stack,
 		return err
 	}
 	defer b.Unlock(ctx, diyStackRef)
-	if err := b.recoverJournalForMutation(ctx, diyStackRef); err != nil {
+	recovered, err := b.recoverJournalForMutation(ctx, diyStackRef)
+	if err != nil {
 		return err
+	}
+	if recovered {
+		// The deployment was built from state read before this recovery, so writing it would silently discard the
+		// recovered changes. A fresh read sees them.
+		return fmt.Errorf("an unfinished journal for %s was recovered and its state changed; "+
+			"re-run the command to apply your change to the recovered state", diyStackRef)
 	}
 
 	stackName := diyStackRef.FullyQualifiedName()

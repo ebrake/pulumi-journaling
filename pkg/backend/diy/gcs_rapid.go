@@ -136,6 +136,7 @@ func (b *rapidBucket) WriteAll(ctx context.Context, key string, data []byte, opt
 	if options.BufferSize > 0 {
 		writer.ChunkSize = options.BufferSize
 	}
+	var expected rapidGenerationPrecondition
 	if options.BeforeWrite != nil {
 		err = options.BeforeWrite(func(v any) bool {
 			switch p := v.(type) {
@@ -144,6 +145,9 @@ func (b *rapidBucket) WriteAll(ctx context.Context, key string, data []byte, opt
 				return true
 			case **storage.Writer:
 				*p = writer
+				return true
+			case **rapidGenerationPrecondition:
+				*p = &expected
 				return true
 			default:
 				return false
@@ -154,9 +158,14 @@ func (b *rapidBucket) WriteAll(ctx context.Context, key string, data []byte, opt
 		}
 	}
 	var conditions *storage.Conditions
-	if options.IfNotExist {
+	switch {
+	case options.IfNotExist:
 		conditions = &storage.Conditions{DoesNotExist: true}
-	} else if options.BeforeWrite != nil {
+	case expected.Generation != 0:
+		// The caller read this generation with the bytes it is replacing. Move enforces it atomically, so no
+		// separate Attrs round trip is needed.
+		conditions = &storage.Conditions{GenerationMatch: expected.Generation}
+	case options.BeforeWrite != nil:
 		// Attrs enforces any handle precondition installed by BeforeWrite. Bind publication to the same generation.
 		attrs, err := target.Attrs(ctx)
 		if err != nil {
@@ -164,7 +173,12 @@ func (b *rapidBucket) WriteAll(ctx context.Context, key string, data []byte, opt
 		}
 		conditions = &storage.Conditions{GenerationMatch: attrs.Generation}
 	}
+	// A successful Move consumes the temporary object, so only failed writes need cleanup.
+	moved := false
 	defer func() {
+		if moved {
+			return
+		}
 		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		_ = temporary.Delete(cleanup)
@@ -178,7 +192,14 @@ func (b *rapidBucket) WriteAll(ctx context.Context, key string, data []byte, opt
 	}
 	_, err = temporary.If(storage.Conditions{GenerationMatch: writer.Attrs().Generation}).Move(
 		ctx, storage.MoveObjectDestination{Object: target.ObjectName(), Conditions: conditions})
+	moved = err == nil
 	return err
+}
+
+// rapidGenerationPrecondition lets a caller that already read an object pass its generation to a Rapid write, which
+// binds publication to it without re-reading attributes.
+type rapidGenerationPrecondition struct {
+	Generation int64
 }
 
 // Copy avoids the rewrite API, which Rapid buckets do not support.
@@ -213,10 +234,9 @@ func (b *rapidBucket) readStream(ctx context.Context, key string) ([]byte, error
 	if err != nil {
 		return nil, err
 	}
-	if attrs.Size == 0 {
-		return nil, nil
-	}
-	reader, err := object.Generation(attrs.Generation).NewRangeReader(ctx, 0, attrs.Size)
+	// Unfinalized append objects can report a stale or zero metadata size despite acknowledged flushes. The
+	// reader discovers the persisted end of this generation instead of truncating recovery to that metadata size.
+	reader, err := object.Generation(attrs.Generation).NewReader(ctx)
 	if err != nil {
 		return nil, err
 	}

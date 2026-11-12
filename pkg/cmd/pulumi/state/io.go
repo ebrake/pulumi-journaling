@@ -117,6 +117,9 @@ func TotalStateEdit(
 	operation func(opts display.Options, snap *deploy.Snapshot) error,
 	overridePromptMessage *string,
 ) error {
+	if err := recoverJournalBeforeEdit(ctx, s); err != nil {
+		return err
+	}
 	snap, err := s.Snapshot(ctx, cmdBackend.SecretsProvider(cmdBackend.DefaultLoginManager))
 	if err != nil {
 		return err

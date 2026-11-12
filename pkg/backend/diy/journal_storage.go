@@ -48,6 +48,14 @@ import (
 
 const diyJournalFeature = "pulumiJournalingV1"
 
+// isStackCheckpointKey reports whether key is one of the checkpoint paths the stack can have. Validating the shape
+// avoids the bucket listing stackPath needs, which would otherwise run on every manifest read. The manifest's
+// hashes bind it to the exact bytes, so the listing's tie-breaking adds no safety here.
+func isStackCheckpointKey(ref *diyBackendReference, key string) bool {
+	plain := filepath.ToSlash(ref.StackBasePath()) + ".json"
+	return key == plain || key == plain+encoding.GZIPExt || key == plain+encoding.ZSTDExt
+}
+
 func journalHash(data []byte) string {
 	h := sha256.Sum256(data)
 	return hex.EncodeToString(h[:])
@@ -56,6 +64,15 @@ func journalHash(data []byte) string {
 func (b *diyBackend) journalDir(ref *diyBackendReference) string {
 	relative := strings.TrimPrefix(filepath.ToSlash(ref.BackupDir()), filepath.ToSlash(BackupsDir)+"/")
 	return path.Join(".pulumi/journal", relative)
+}
+
+// readJournalObject reads any object under the journal prefix. The Rapid stream is an unfinalized appendable object
+// that ordinary reads cannot return, so it goes through the ranged reader the rest of the code already uses for it.
+func (b *diyBackend) readJournalObject(ctx context.Context, key string) ([]byte, error) {
+	if b.rapid != nil && strings.HasSuffix(key, "/journal.stream") {
+		return b.rapid.readStream(ctx, key)
+	}
+	return b.bucket.ReadAll(ctx, key)
 }
 
 func (b *diyBackend) journalRead(ctx context.Context, key string) ([]byte, error) {
@@ -115,6 +132,10 @@ func (b *diyBackend) journalWrite(ctx context.Context, key string, data []byte, 
 					return errors.New("GCS generation precondition unavailable")
 				}
 				*handle = (*handle).If(storage.Conditions{GenerationMatch: generation})
+				var rapid *rapidGenerationPrecondition
+				if as(&rapid) {
+					rapid.Generation = generation
+				}
 			}
 			return nil
 		}

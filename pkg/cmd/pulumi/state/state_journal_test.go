@@ -38,6 +38,16 @@ func TestJournalRecoveryRequiresExplicitStack(t *testing.T) {
 	require.ErrorContains(t, command.Execute(), `required flag(s) "stack" not set`)
 }
 
+// nonDIYBackend gives mock stacks the Backend() that real stacks always have, which state edits now consult to
+// recover DIY journals before loading a snapshot.
+func nonDIYBackend() backend.Backend { return &backend.MockBackend{} }
+
+func TestRecoverJournalBeforeEditIgnoresNonDIYBackends(t *testing.T) {
+	t.Parallel()
+	s := &backend.MockStack{BackendF: nonDIYBackend}
+	require.NoError(t, recoverJournalBeforeEdit(t.Context(), s))
+}
+
 func TestJournalDiscardRequiresYes(t *testing.T) {
 	t.Parallel()
 	command := newStateJournalCommand(nil, nil)
