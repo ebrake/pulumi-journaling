@@ -116,10 +116,11 @@ jobs:
           SOURCE_COMMIT: ${{ github.sha }}
         run: |
           VERSION=$(python -c 'import json; print(json.load(open("journaling-release.json"))["version"])')
+          UPSTREAM_VERSION=$(python -c 'import json; print(json.load(open("journaling-release.json"))["upstreamVersion"])')
           gh release create "v$VERSION" release/artifacts/*.tar.gz release/artifacts/pulumi-cli.json release/dist/* \
             --repo ebrake/pulumi-journaling --target "$SOURCE_COMMIT" \
             --title "pulumi-journaling $VERSION" \
-            --notes 'Independent fork of Pulumi v3.274.1. Recoverable journaling for local files, GCS, S3, Azure Blob and PostgreSQL. Based on https://github.com/pulumi/pulumi/pull/22074 and hardened by E Brake. Guide: https://github.com/ebrake/pulumi-journaling/blob/journaling/docs/diy-journaling.md'
+            --notes "Independent fork of Pulumi v${UPSTREAM_VERSION}. Recoverable journaling for local files, GCS, S3, Azure Blob and PostgreSQL. Based on https://github.com/pulumi/pulumi/pull/22074 and hardened by E Brake. Guide: https://github.com/ebrake/pulumi-journaling/blob/journaling/docs/diy-journaling.md"
 
   pypi:
     if: inputs.publish_pypi && inputs.publish_github

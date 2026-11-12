@@ -162,7 +162,7 @@ func (c *loginCmd) newCommand(ws pkgWorkspace.Context, lm backend.LoginManager, 
 					"warning: existing stored credentials can no longer be decrypted: %v\n", err)
 				if cmdutil.Interactive() {
 					replace := false
-					if err := survey.AskOne(&survey.Confirm{
+					if err := ui.AskOne(&survey.Confirm{
 						Message: "Replace the stored credentials with the ones from this login?",
 						Default: false,
 					}, &replace, ui.SurveyIcons(displayOptions.Color)); err != nil || !replace {
@@ -326,6 +326,15 @@ func (c *loginCmd) newCommand(ws pkgWorkspace.Context, lm backend.LoginManager, 
 				return loginError(cloudURL, urlSource, cwd, err)
 			}
 
+			if userProvidedURL {
+				if absURL, wasRelative := resolveRelativeFileURL(cloudURL); wasRelative {
+					fmt.Fprintf(cmd.ErrOrStderr(),
+						"Warning: '%s' is a relative path, so every command will look for state relative to "+
+							"the directory it runs in. To always use this location, run `pulumi login %s` instead.\n",
+						cloudURL, absURL)
+				}
+			}
+
 			if diy.IsDIYBackendURL(cloudURL) {
 				if defaultOrg != "" {
 					return errors.New("unable to set default org for this type of backend")
@@ -460,6 +469,25 @@ func unwrapBucketOpenError(err error, cloudURL string) error {
 	return cause
 }
 
+func resolveRelativeFileURL(cloudURL string) (string, bool) {
+	if !strings.HasPrefix(cloudURL, diy.FilePathPrefix) {
+		return "", false
+	}
+	path, query, hasQuery := strings.Cut(strings.TrimPrefix(cloudURL, diy.FilePathPrefix), "?")
+	if strings.HasPrefix(path, "~") || strings.HasPrefix(path, "/") || filepath.IsAbs(path) {
+		return "", false
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", false
+	}
+	absURL := diy.FilePathPrefix + filepath.ToSlash(abs)
+	if hasQuery {
+		absURL += "?" + query
+	}
+	return absURL, true
+}
+
 func validateCloudBackendType(typ string) error {
 	kind, _, _ := strings.Cut(typ, ":")
 	supportedKinds := []string{"azblob", "gs", "s3", "file", "https", "http", "postgres"}
@@ -489,7 +517,7 @@ func chooseAccount(accounts map[string]workspace.Account, opts display.Options) 
 	message = opts.Color.Colorize(colors.SpecPrompt + message + colors.Reset)
 
 	var option string
-	if err := survey.AskOne(&survey.Select{
+	if err := ui.AskOne(&survey.Select{
 		Message:  message,
 		Options:  acts,
 		PageSize: pageSize,

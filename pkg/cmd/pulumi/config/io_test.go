@@ -15,7 +15,6 @@
 package config
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"testing"
@@ -204,7 +203,7 @@ func TestOpenStackEnvUnsupportedBackend(t *testing.T) {
 	require.NoError(t, err)
 
 	_, _, err = openStackEnv(t.Context(), stack, &projectStack, nil)
-	assert.Error(t, err)
+	assert.Error(t, err) //nolint:forbidigo // pre-existing
 }
 
 func getMockStackWithEnv(t *testing.T, env map[string]esc.Value) *backend.MockStack {
@@ -661,7 +660,7 @@ func TestOpenStackEnvError(t *testing.T) {
 	require.NoError(t, err)
 
 	_, _, err = openStackEnv(t.Context(), stack, &projectStack, nil)
-	assert.Error(t, err)
+	assert.Error(t, err) //nolint:forbidigo // pre-existing
 }
 
 func TestParseConfigKey(t *testing.T) {
@@ -803,7 +802,7 @@ func TestParseConfigKey(t *testing.T) {
 			t.Parallel()
 			got, err := ParseConfigKey(ws, tt.input, tt.path)
 			if tt.wantErr != "" {
-				require.Error(t, err)
+				require.Error(t, err) //nolint:forbidigo // pre-existing
 				assert.Contains(t, err.Error(), tt.wantErr)
 				return
 			}
@@ -1037,22 +1036,6 @@ func TestCheckStackEnvManaged(t *testing.T) {
 	env, _, err := checkStackEnv(t.Context(), s, loadTestProjectStack(t, managedStackYAML))
 	require.NoError(t, err)
 	assert.Same(t, checked, env)
-}
-
-func TestPrintManagedEnvironmentNotices(t *testing.T) {
-	t.Parallel()
-
-	s, _ := newManagedStack(t, nil)
-
-	var out bytes.Buffer
-	printManagedEnvironmentNotices(&out, s, &apitype.UpdateProgramEnvironment{BaseRevision: 7, ChangeRequestID: "cr-1"})
-	assert.Equal(t,
-		"using local changes to environment p/old (based on revision 7); an update publishes them, a preview does not\n",
-		out.String())
-
-	out.Reset()
-	printManagedEnvironmentNotices(&out, s, &apitype.UpdateProgramEnvironment{BaseRevision: 7})
-	assert.Empty(t, out.String())
 }
 
 func TestGetStackConfigurationOrLatestManaged(t *testing.T) {

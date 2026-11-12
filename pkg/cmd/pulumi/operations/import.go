@@ -23,7 +23,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
+	"slices"
 	"strings"
 
 	pkgresource "github.com/pulumi/pulumi/pkg/v3/resource"
@@ -740,15 +742,7 @@ func generateImportedDefinitions(ctx *plugin.Context,
 				return err
 			}
 
-			var contents []byte
-			for _, v := range files {
-				contents = v
-			}
-
-			if _, err := w.Write(contents); err != nil {
-				return err
-			}
-			return nil
+			return writeGeneratedProgram(w, files)
 		},
 		resources,
 		snap.Resources,
@@ -756,6 +750,24 @@ func generateImportedDefinitions(ctx *plugin.Context,
 	)
 
 	return true, err
+}
+
+func writeGeneratedProgram(w io.Writer, files map[string][]byte) error {
+	for _, name := range slices.Sorted(maps.Keys(files)) {
+		if strings.HasPrefix(name, "sdks/") {
+			continue
+		}
+		contents := files[name]
+		if _, err := w.Write(contents); err != nil {
+			return err
+		}
+		if len(contents) > 0 && contents[len(contents)-1] != '\n' {
+			if _, err := io.WriteString(w, "\n"); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func NewImportCmd() *cobra.Command {
@@ -844,7 +856,7 @@ func NewImportCmd() *cobra.Command {
 			"    }\n" +
 			"\n" +
 			"The full import file schema references can be found in the " +
-			"[import documentation](https://www.pulumi.com/docs/iac/adopting-pulumi/import/#bulk-import-operations).\n" +
+			"[import documentation](https://www.pulumi.com/docs/iac/guides/migration/import/#import-file-schema).\n" +
 			"\n" +
 			"The import JSON file can be generated from a Pulumi program by running\n" +
 			"\n" +

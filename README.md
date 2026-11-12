@@ -1,6 +1,6 @@
 # pulumi-journaling
 
-An independent fork of [Pulumi](https://github.com/pulumi/pulumi), maintained by **E Brake** <ebrake123@icloud.com>, with hardened, recoverable journaling for every DIY state storage backend: local files, Amazon S3 and compatible stores, Google Cloud Storage, Azure Blob Storage, and PostgreSQL. Based on upstream **v3.274.1** at commit [`8f735e662d805b7a5bda70931bd627c69fbf38b8`](https://github.com/pulumi/pulumi/commit/8f735e662d805b7a5bda70931bd627c69fbf38b8), the latest stable release when this fork was prepared.
+An independent fork of [Pulumi](https://github.com/pulumi/pulumi), maintained by **E Brake** <ebrake123@icloud.com>, with hardened, recoverable journaling for every DIY state storage backend: local files, Amazon S3 and compatible stores, Google Cloud Storage, Azure Blob Storage, and PostgreSQL. Based on upstream **v3.275.0** at commit [`cc3a399d789290e4d98becbbec4ffca3ad30230d`](https://github.com/pulumi/pulumi/commit/cc3a399d789290e4d98becbbec4ffca3ad30230d), the latest stable release when this fork was prepared.
 
 This project is independently maintained and is not affiliated with, sponsored by, or endorsed by Pulumi Corporation. Pulumi is a trademark of Pulumi Corporation.
 
@@ -66,6 +66,8 @@ pulumi state journal recover --stack organization/project/stack
 Recovery invokes no resource providers. If the previous process crashed, first verify it has stopped, then remove its stale native lock with `pulumi cancel`. If recovery refuses corrupt or unexplained state, preserve the evidence and consult the [recovery guide](https://github.com/ebrake/pulumi-journaling/blob/main/docs/diy-journaling.md) before using `pulumi state journal discard --yes`.
 
 Complete recovery before changing to an upstream CLI or another fork. Clean snapshots and provider packages retain upstream contracts.
+
+Pulumi 3.275.0 requires project-scoped DIY state. If you still use legacy non-project state, use Pulumi 3.274.1 or `pulumi-journaling==3.274.1.post2` to run `pulumi state upgrade` before installing this release.
 
 ## Development and releases
 

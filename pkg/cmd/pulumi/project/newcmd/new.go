@@ -289,18 +289,11 @@ func runNew(ctx context.Context, args newArgs) (err error) {
 		args.name = projectName
 	}
 
-	defaults := resolveProjectDefaults(ctx, b, orgName, template, args, opts, cwd)
-	confirmed, err := confirmGuidedValues(ctx, b, orgName, defaults, template, args, opts)
+	answers, err := askSetupQuestions(ctx, ws, b, orgName, s, template, args, opts, cwd)
 	if err != nil {
-		return err
+		return friendlyInterrupt(err, errNoProjectCreated)
 	}
-	if confirmed != nil {
-		args.name, args.description = confirmed.name, confirmed.description
-	} else if args.name, args.description, err = promptSequentialValues(
-		ctx, b, orgName, defaults, args, opts,
-	); err != nil {
-		return err
-	}
+	args.name, args.description = answers.name, answers.description
 
 	// Actually copy the files.
 	if err = cmdTemplates.CopyTemplateFiles(template.Dir, cwd, args.force, args.name, args.description); err != nil {
@@ -310,7 +303,7 @@ func runNew(ctx context.Context, args newArgs) (err error) {
 		return err
 	}
 
-	if confirmed == nil {
+	if !answers.guided {
 		fmt.Fprintf(args.stdout, "Created project '%s'\n", args.name)
 		fmt.Fprintln(args.stdout)
 	}
@@ -337,12 +330,11 @@ func runNew(ctx context.Context, args newArgs) (err error) {
 		})
 	}
 
-	for _, opt := range args.runtimeOptions {
-		parts := strings.Split(strings.TrimSpace(opt), "=")
-		if len(parts) != 2 {
-			return fmt.Errorf("invalid runtime option: %s", opt)
-		}
-		proj.Runtime.SetOption(parts[0], parts[1])
+	if err = setRuntimeOptionFlags(&proj.Runtime, args.runtimeOptions); err != nil {
+		return err
+	}
+	for k, v := range answers.runtimeOptions {
+		proj.Runtime.SetOption(k, v)
 	}
 
 	if err = pkgWorkspace.SaveProject(proj); err != nil {
@@ -370,7 +362,7 @@ func runNew(ctx context.Context, args newArgs) (err error) {
 		}
 	}()
 	if !args.generateOnly && s == nil {
-		if s, createdStackName, err = confirmed.createStack(ctx, sink, ws, b, root, args, opts); err != nil {
+		if s, createdStackName, err = answers.createStack(ctx, sink, ws, b, root, args, opts); err != nil {
 			return err
 		}
 		if s.ConfigLocation().ManagedEnvironment != "" {
@@ -378,37 +370,11 @@ func runNew(ctx context.Context, args newArgs) (err error) {
 		}
 	}
 
-	projinfo := &engine.Projinfo{Proj: proj, Root: root}
-	hostReg := cmdCmd.NewDefaultRegistry(
-		ctx, cmdBackend.DefaultLoginManager, pkgWorkspace.Instance, proj, cmdutil.Diag(), env.Global(),
-	)
-	pluginHost, err := pkghost.New(
-		context.WithoutCancel(ctx), cmdutil.Diag(), cmdutil.Diag(), nil, pkgWorkspace.EnsureLanguageInstalled,
-		schema.NewLoaderServerFromContext, convert.NewMapperServerFromContext,
-		packageworkspace.NewResolverServer(hostReg),
-	)
+	pluginHost, pluginCtx, entryPoint, err := newProjectPluginContext(ctx, ws, proj, root)
 	if err != nil {
 		return err
 	}
 	defer contract.IgnoreClose(pluginHost) // host is owned here, closed after the context
-	cloudCredentialEnv, err := cmdBackend.PluginCloudCredentialEnv(ctx, ws, cmdBackend.DefaultLoginManager, proj)
-	if err != nil {
-		return err
-	}
-	_, entryPoint, pluginCtx, err := engine.ProjectInfoContext(
-		ctx,
-		projinfo,
-		pluginHost,
-		cmdutil.Diag(),
-		cmdutil.Diag(),
-		false, /* disableProviderPreview */
-		nil,   /* tracingSpan */
-		nil,   /* config */
-		cloudCredentialEnv,
-	)
-	if err != nil {
-		return err
-	}
 	defer pluginCtx.Close()
 
 	// If we're creating an empty project we won't have a runtime name
@@ -421,26 +387,6 @@ func runNew(ctx context.Context, args newArgs) (err error) {
 
 		programInfo := plugin.NewProgramInfo(pluginCtx.Root, pluginCtx.Pwd, entryPoint, proj.Runtime.Options())
 
-		// Query the language runtime for additional options.
-		if args.promptRuntimeOptions != nil {
-			options, err := args.promptRuntimeOptions(pluginCtx, lang, &proj.Runtime, entryPoint, opts,
-				args.yes, args.interactive, args.prompt)
-			if err != nil {
-				return err
-			}
-			if len(options) > 0 {
-				// Save the new options
-				for k, v := range options {
-					proj.Runtime.SetOption(k, v)
-				}
-				if err = pkgWorkspace.SaveProject(proj); err != nil {
-					return fmt.Errorf("saving project: %w", err)
-				}
-				// update programInfo to have the new options
-				programInfo = plugin.NewProgramInfo(pluginCtx.Root, pluginCtx.Pwd, entryPoint, proj.Runtime.Options())
-			}
-		}
-
 		// Let the language runtime do some templating
 		if err := args.languageTemplate(pluginCtx.Request(), lang, programInfo, proj.Name); err != nil {
 			return fmt.Errorf("language template: %w", err)
@@ -450,7 +396,7 @@ func runNew(ctx context.Context, args newArgs) (err error) {
 	// Prompt for config values (if needed) and save.
 	var savedConfig config.Map
 	if !args.generateOnly {
-		if savedConfig, err = confirmed.saveConfig(ctx, cmdutil.Diag(), ssml, ws, proj, s, template, args, opts); err != nil {
+		if savedConfig, err = answers.saveConfig(ctx, cmdutil.Diag(), ssml, ws, proj, s, template, args, opts); err != nil {
 			return err
 		}
 	}
@@ -491,7 +437,7 @@ func runNew(ctx context.Context, args newArgs) (err error) {
 
 	preflightCloudCredentials(ctx, args, sink, pluginHost, proj, root, s, packages, savedConfig, opts)
 
-	if confirmed != nil {
+	if answers.guided {
 		// Any other stack announced itself as it was created, or already existed.
 		rows := []field{{"Project name", args.name}}
 		if createdStackName != "" {
@@ -511,6 +457,56 @@ func runNew(ctx context.Context, args newArgs) (err error) {
 		fmt.Fprintln(args.stdout, template.Quickstart)
 	}
 
+	return nil
+}
+
+// newProjectPluginContext starts a plugin host and context for proj. Close the context before the host.
+func newProjectPluginContext(
+	ctx context.Context, ws pkgWorkspace.Context, proj *workspace.Project, root string,
+) (plugin.Host, *plugin.Context, string, error) {
+	hostReg := cmdCmd.NewDefaultRegistry(
+		ctx, cmdBackend.DefaultLoginManager, pkgWorkspace.Instance, proj, cmdutil.Diag(), env.Global(),
+	)
+	pluginHost, err := pkghost.New(
+		context.WithoutCancel(ctx), cmdutil.Diag(), cmdutil.Diag(), nil, pkgWorkspace.EnsureLanguageInstalled,
+		schema.NewLoaderServerFromContext, convert.NewMapperServerFromContext,
+		packageworkspace.NewResolverServer(hostReg),
+	)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	cloudCredentialEnv, err := cmdBackend.PluginCloudCredentialEnv(ctx, ws, cmdBackend.DefaultLoginManager, proj)
+	if err != nil {
+		contract.IgnoreClose(pluginHost)
+		return nil, nil, "", err
+	}
+	_, entryPoint, pluginCtx, err := engine.ProjectInfoContext(
+		ctx,
+		&engine.Projinfo{Proj: proj, Root: root},
+		pluginHost,
+		cmdutil.Diag(),
+		cmdutil.Diag(),
+		false, /* disableProviderPreview */
+		nil,   /* tracingSpan */
+		nil,   /* config */
+		cloudCredentialEnv,
+	)
+	if err != nil {
+		contract.IgnoreClose(pluginHost)
+		return nil, nil, "", err
+	}
+	return pluginHost, pluginCtx, entryPoint, nil
+}
+
+// setRuntimeOptionFlags applies --runtime-options (key=value pairs) to runtime.
+func setRuntimeOptionFlags(runtime *workspace.ProjectRuntimeInfo, flags []string) error {
+	for _, opt := range flags {
+		parts := strings.Split(strings.TrimSpace(opt), "=")
+		if len(parts) != 2 {
+			return fmt.Errorf("invalid runtime option: %s", opt)
+		}
+		runtime.SetOption(parts[0], parts[1])
+	}
 	return nil
 }
 
@@ -804,7 +800,7 @@ func promptRuntimeOptions(ctx *plugin.Context, language plugin.LanguageRuntime, 
 
 				var response string
 				message := opts.Color.Colorize(colors.SpecPrompt + "\r" + optionPrompt.Description + colors.Reset)
-				if err := survey.AskOne(&survey.Select{
+				if err := ui.AskOne(&survey.Select{
 					Message: message,
 					Options: choices,
 				}, &response, ui.SurveyIcons(opts.Color), nil); err != nil {

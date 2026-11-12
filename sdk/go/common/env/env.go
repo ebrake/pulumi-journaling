@@ -195,13 +195,6 @@ var (
 		"Disables the warning about legacy stack files mixed with project-scoped stack files.",
 		env.Alternative("SELF_MANAGED_STATE_NO_LEGACY_WARNING"))
 
-	DIYBackendIgnoreDeprecationError = env.Bool("DIY_BACKEND_IGNORE_DEPRECATION_ERROR",
-		"Disables the error about legacy stack mode being deprecated.")
-
-	DIYBackendLegacyLayout = env.Bool("DIY_BACKEND_LEGACY_LAYOUT",
-		"Uses the legacy layout for new buckets, which currently default to project-scoped stacks.",
-		env.Alternative("SELF_MANAGED_STATE_LEGACY_LAYOUT"))
-
 	DIYBackendJournaling = env.Bool("DIY_BACKEND_JOURNALING", "Enable journaling for all DIY state backends")
 
 	DIYBackendGzip = env.Bool("DIY_BACKEND_GZIP",
