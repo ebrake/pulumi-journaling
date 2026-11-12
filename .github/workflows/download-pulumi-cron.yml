@@ -1,8 +1,6 @@
 name: Download Pulumi Cron
 "on":
   workflow_dispatch: {}
-  schedule:
-    - cron: 0 8 * * *
 
 defaults:
   run:

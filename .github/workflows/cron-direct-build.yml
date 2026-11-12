@@ -1,9 +1,7 @@
 name: Direct build
 
 on:
-  schedule:
-  # 1030 UTC every weekday
-  - cron: "30 10 * * 1-5"
+  workflow_dispatch: {}
 
 jobs:
   pkg:
