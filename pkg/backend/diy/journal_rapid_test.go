@@ -77,5 +77,5 @@ func TestRapidJournalStreamRejectsCorruption(t *testing.T) {
 	empty := slices.Clone(data)
 	binary.BigEndian.PutUint32(empty[len(rapidJournalMagic):], 0)
 	_, err = decodeRapidJournalStream(empty)
-	require.Error(t, err)
+	require.ErrorContains(t, err, "header checksum")
 }

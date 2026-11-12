@@ -58,18 +58,18 @@ func TestGCSRapidTransport(t *testing.T) {
 	second := []byte("replacement complete bytes")
 	key := "probe/checkpoint"
 	require.NoError(t, b.bucket.WriteAll(t.Context(), key, first, nil))
-	require.Error(t, b.bucket.WriteAll(t.Context(), key, second, &blob.WriterOptions{IfNotExist: true}))
+	require.ErrorContains(t, b.bucket.WriteAll(t.Context(), key, second, &blob.WriterOptions{IfNotExist: true}), "condition")
 	actual, err := b.bucket.ReadAll(t.Context(), key)
 	require.NoError(t, err)
 	require.Equal(t, first, actual)
 	require.NoError(t, b.journalWrite(t.Context(), key, second, journalHash(first)))
-	require.Error(t, b.journalWrite(t.Context(), key, first, journalHash(first)))
-	require.Error(t, b.bucket.WriteAll(t.Context(), key, first, &blob.WriterOptions{BeforeWrite: func(as func(any) bool) error {
+	require.ErrorContains(t, b.journalWrite(t.Context(), key, first, journalHash(first)), "checkpoint changed unexpectedly")
+	require.ErrorContains(t, b.bucket.WriteAll(t.Context(), key, first, &blob.WriterOptions{BeforeWrite: func(as func(any) bool) error {
 		var handle **storage.ObjectHandle
 		require.True(t, as(&handle))
 		*handle = (*handle).If(storage.Conditions{GenerationMatch: 1})
 		return nil
-	}}))
+	}}), "condition")
 	actual, err = b.bucket.ReadAll(t.Context(), key)
 	require.NoError(t, err)
 	require.Equal(t, second, actual)
@@ -86,7 +86,7 @@ func TestGCSRapidTransport(t *testing.T) {
 	require.NoError(t, err)
 	ref2, err := b2.store.ParseReference("organization/rapid-canary/teststack")
 	require.NoError(t, err)
-	require.Error(t, b2.Lock(t.Context(), ref2))
+	require.ErrorContains(t, b2.Lock(t.Context(), ref2), "the stack is currently locked")
 	b.Unlock(t.Context(), ref)
 	require.NoError(t, b2.Lock(t.Context(), ref2))
 	b2.Unlock(t.Context(), ref2)

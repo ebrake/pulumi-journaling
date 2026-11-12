@@ -120,7 +120,7 @@ func TestDIYJournalStorageBackends(t *testing.T) {
 					key := path.Join(b.journalDir(ref), "immutable-probe")
 					require.NoError(t, b.journalPut(t.Context(), key, []byte("original")))
 					require.NoError(t, b.journalPut(t.Context(), key, []byte("original")))
-					require.Error(t, b.journalPut(t.Context(), key, []byte("overwrite")))
+					require.ErrorContains(t, b.journalPut(t.Context(), key, []byte("overwrite")), key)
 					// Conditional replacement must preserve a competing object, including multipart checkpoints.
 					for _, size := range []int{16, 12 * 1024 * 1024} {
 						t.Run(strconv.Itoa(size), func(t *testing.T) {
@@ -130,7 +130,8 @@ func TestDIYJournalStorageBackends(t *testing.T) {
 							underlying := b.bucket
 							b.bucket = &journalRacingBucket{Bucket: underlying, key: key, replacement: replacement}
 							if scheme != "file" {
-								require.Error(t, b.journalWrite(t.Context(), key, []byte(strings.Repeat("c", size)), journalHash(original)))
+								err := b.journalWrite(t.Context(), key, []byte(strings.Repeat("c", size)), journalHash(original))
+								require.ErrorContains(t, err, key)
 								observed, err := underlying.ReadAll(t.Context(), key)
 								require.NoError(t, err)
 								require.Equal(t, replacement, observed)

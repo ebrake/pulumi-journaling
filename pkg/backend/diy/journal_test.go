@@ -234,7 +234,14 @@ func TestDIYJournalPreservesUnknownState(t *testing.T) {
 			}
 			before, err := b.bucket.ReadAll(t.Context(), m.Checkpoint)
 			require.NoError(t, err)
-			require.Error(t, b.RecoverJournal(t.Context(), ref))
+			expectedError := map[string]string{
+				"checkpoint": "unexplained checkpoint change",
+				"manifest":   "invalid journal manifest",
+				"entry":      "unexpected journal object",
+				"reference":  "journal references missing resource operation",
+				"version":    "unsupported journal entry version",
+			}[kind]
+			require.ErrorContains(t, b.RecoverJournal(t.Context(), ref), expectedError)
 			after, err := b.bucket.ReadAll(t.Context(), m.Checkpoint)
 			require.NoError(t, err)
 			require.Equal(t, before, after)
@@ -274,7 +281,7 @@ func TestDIYJournalerAsyncFailure(t *testing.T) {
 	}))
 	require.ErrorContains(t, j.Close(), "injected entry failure")
 	require.ErrorContains(t, j.Close(), "injected entry failure")
-	require.Error(t, j.AddJournalEntry(engine.JournalEntry{}))
+	require.ErrorContains(t, j.AddJournalEntry(engine.JournalEntry{}), "journal is closed")
 }
 
 func TestDIYJournalPendingOperation(t *testing.T) {

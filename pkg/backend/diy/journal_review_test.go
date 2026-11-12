@@ -81,7 +81,7 @@ func TestDIYJournalIntegrityFailureStillCommits(t *testing.T) {
 	writeDIYTestEntry(t, b, ref, m, apitype.JournalEntry{
 		Version: 1, SequenceID: 1, OperationID: 1, Kind: apitype.JournalEntryKindSuccess, State: child,
 	})
-	require.Error(t, b.RecoverJournal(t.Context(), ref))
+	require.ErrorContains(t, b.RecoverJournal(t.Context(), ref), "snapshot integrity failure")
 	require.NoError(t, b.requireCleanJournal(t.Context(), ref))
 	cp, _, _, err := b.getCheckpoint(t.Context(), ref)
 	require.NoError(t, err)

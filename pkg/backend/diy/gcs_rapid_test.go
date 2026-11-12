@@ -26,23 +26,26 @@ func TestGCSBackendAPI(t *testing.T) {
 	t.Parallel()
 	for _, test := range []struct {
 		name, input, api, remaining string
-		invalid                     bool
+		errorMessage                string
 	}{
 		{name: "ordinary", input: "gs://bucket/prefix", remaining: "gs://bucket/prefix"},
 		{name: "ordinary options", input: "gs://bucket?anonymous=true", remaining: "gs://bucket?anonymous=true"},
 		{name: "grpc", input: "gs://bucket/prefix?gcs_api=grpc", api: "grpc", remaining: "gs://bucket/prefix"},
 		{name: "rapid", input: "gs://bucket/prefix?gcs_api=rapid", api: "rapid", remaining: "gs://bucket/prefix"},
-		{name: "unknown", input: "gs://bucket?gcs_api=unknown", invalid: true},
-		{name: "repeated", input: "gs://bucket?gcs_api=grpc&gcs_api=rapid", invalid: true},
-		{name: "incompatible", input: "gs://bucket?gcs_api=rapid&anonymous=true", invalid: true},
+		{name: "unknown", input: "gs://bucket?gcs_api=unknown", errorMessage: "gcs_api must be grpc or rapid"},
+		{name: "repeated", input: "gs://bucket?gcs_api=grpc&gcs_api=rapid", errorMessage: "gcs_api must be grpc or rapid"},
+		{
+			name: "incompatible", input: "gs://bucket?gcs_api=rapid&anonymous=true",
+			errorMessage: "gcs_api cannot be combined with other GCS query parameters",
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			u, err := url.Parse(test.input)
 			require.NoError(t, err)
 			api, err := gcsBackendAPI(u)
-			if test.invalid {
-				require.Error(t, err)
+			if test.errorMessage != "" {
+				require.EqualError(t, err, test.errorMessage)
 				return
 			}
 			require.NoError(t, err)
