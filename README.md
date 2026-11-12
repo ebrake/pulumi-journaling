@@ -94,7 +94,7 @@ Other DIY backends retain their existing journal and recovery paths.
 
 ## Basis and hardening
 
-DIY journaling is based on **Jason Rowsell's prototype in [Pulumi PR #22074](https://github.com/pulumi/pulumi/pull/22074)**. E Brake hardened and extended that basis with:
+DIY journaling is based on **Jason Rowsell's prototype in [Pulumi PR #22074](https://github.com/pulumi/pulumi/pull/22074)**. but hardened and extended that basis with:
 
 - Encrypted immutable entries, bounded asynchronous writes, and acknowledgements that wait for the entire submitted prefix to become durable
 - Epoch identity, checkpoint hashes and required-feature guards that prevent stock clients from consuming an unfinished journal
