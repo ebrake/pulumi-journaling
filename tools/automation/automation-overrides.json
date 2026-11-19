@@ -44,7 +44,6 @@
         {
             "path": ["destroy"],
             "propagate": false,
-            "exclude": true,
             "flags": {
                 "skip-preview": { "omit": true, "preset": true }
             }
@@ -205,8 +204,9 @@
         {
             "path": ["insights"],
             "propagate": true,
-            "exclude": true,
-            "flags": {}
+            "flags": {
+                "output": { "omit": true, "preset": "json" }
+            }
         },
         {
             "path": ["login"],
@@ -266,8 +266,10 @@
         {
             "path": ["preview"],
             "propagate": true,
-            "exclude": true,
-            "flags": {}
+            "flags": {
+                "output": { "omit": true, "preset": "json" },
+                "json": { "omit": true }
+            }
         },
         {
             "path": ["project", "list"],

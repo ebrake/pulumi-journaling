@@ -1,13 +1,13 @@
 # pulumi-journaling
 
-An independent fork of [Pulumi](https://github.com/pulumi/pulumi), maintained by **E Brake** <ebrake123@icloud.com>, with hardened, recoverable journaling for every DIY state storage backend: local files, Amazon S3 and compatible stores, Google Cloud Storage, Azure Blob Storage, and PostgreSQL. Based on upstream **v3.275.0** at commit [`cc3a399d789290e4d98becbbec4ffca3ad30230d`](https://github.com/pulumi/pulumi/commit/cc3a399d789290e4d98becbbec4ffca3ad30230d), the latest stable release when this fork was prepared.
+An independent fork of [Pulumi](https://github.com/pulumi/pulumi), maintained by **E Brake** <ebrake123@icloud.com>, with hardened, recoverable journaling for every DIY state storage backend: local files, Amazon S3 and compatible stores, Google Cloud Storage, Azure Blob Storage, and PostgreSQL. Based on upstream **v3.277.0** at commit [`a95f099fa05b8c561c511e0a1663b6bf4f2afafb`](https://github.com/pulumi/pulumi/commit/a95f099fa05b8c561c511e0a1663b6bf4f2afafb).
 
 This project is independently maintained and is not affiliated with, sponsored by, or endorsed by Pulumi Corporation. Pulumi is a trademark of Pulumi Corporation.
 
 ## Install
 
 ```sh
-python -m pip install pulumi-journaling==3.275.0.post2
+python -m pip install pulumi-journaling==3.277.0.post1
 pulumi-journaling version
 ```
 
@@ -57,7 +57,7 @@ pulumi preview --stack organization/my-project/dev
 
 If the previous process crashed and left a lock, first verify that process has stopped, then run `pulumi cancel --stack organization/my-project/dev` to remove its stale lock before recovery. Review the preview and resume deployment normally; provider-side effects from an interrupted operation may still need normal Pulumi reconciliation.
 
-If recovery refuses corrupt or unexplained state, preserve the evidence and consult the [recovery guide](https://github.com/ebrake/pulumi-journaling/blob/main/docs/diy-journaling.md) before using `pulumi state journal discard --yes`. Discarding can leave state missing changes from the interrupted operation.
+If recovery refuses corrupt or unexplained state, preserve the evidence and consult the [recovery guide](https://github.com/ebrake/pulumi-journaling/blob/journaling/docs/diy-journaling.md) before using `pulumi state journal discard --yes`. Discarding can leave state missing changes from the interrupted operation.
 
 ### Disable journaling
 
@@ -69,7 +69,7 @@ PULUMI_DIY_BACKEND_JOURNALING=false pulumi up
 
 Use `export PULUMI_DIY_BACKEND_JOURNALING=false` to disable new journals for the shell or CI job. Unfinished journals still recover before mutating operations. Complete recovery before changing to an upstream CLI or another fork. Clean snapshots and provider packages retain upstream contracts.
 
-Pulumi 3.275.0 requires project-scoped DIY state. If you still use legacy non-project state, first recover any unfinished journals with the CLI that created them, then use Pulumi 3.274.1 or `pulumi-journaling==3.274.1.post2` to run `pulumi state upgrade`, and only then install this release. See [Upgrading legacy non-project state](https://github.com/ebrake/pulumi-journaling/blob/main/docs/diy-journaling.md#upgrading-legacy-non-project-state).
+Pulumi 3.275.0 and later require project-scoped DIY state. If you still use legacy non-project state, first recover any unfinished journals with the CLI that created them, then use Pulumi 3.274.1 or `pulumi-journaling==3.274.1.post2` to run `pulumi state upgrade`, and only then install this release. See [Upgrading legacy non-project state](https://github.com/ebrake/pulumi-journaling/blob/journaling/docs/diy-journaling.md#upgrading-legacy-non-project-state).
 
 ## Rapid GCS and storage latency
 
@@ -89,7 +89,7 @@ cannot use direct connectivity. Remote operator CLIs can leave it unset.
 
 Rapid is zonal storage and does not provide object versioning or soft delete.
 Keep verified checkpoint archives outside the bucket and exclude current state
-and active journals from lifecycle deletion. See the [Rapid transport guide](https://github.com/ebrake/pulumi-journaling/blob/main/docs/diy-journaling.md#rapid-gcs-transport).
+and active journals from lifecycle deletion. See the [Rapid transport guide](https://github.com/ebrake/pulumi-journaling/blob/journaling/docs/diy-journaling.md#rapid-gcs-transport).
 Other DIY backends retain their existing journal and recovery paths.
 
 ## State persistence benchmarks
@@ -131,13 +131,13 @@ DIY journaling is based on **Jason Rowsell's prototype in [Pulumi PR #22074](htt
 - Conditional checkpoint replacement for GCS generations, S3 ETags Azure ETags, and exact PostgreSQL row versions, plus atomic replacement and fsync for local files
 - Fault-injection, cancellation, durability-ordering, concurrent-reader, recovery and storage-driver tests; version-pinned CLI bundles and a checksummed Python launcher
 
-See the [journaling and recovery guide](https://github.com/ebrake/pulumi-journaling/blob/main/docs/diy-journaling.md) for operational details and tradeoffs. S3-compatible services must implement conditional writes and strongly consistent reads and listings. An endpoint that rejects required preconditions fails the operation; the CLI does not fall back to unconditional checkpoint replacement.
+See the [journaling and recovery guide](https://github.com/ebrake/pulumi-journaling/blob/journaling/docs/diy-journaling.md) for operational details and tradeoffs. S3-compatible services must implement conditional writes and strongly consistent reads and listings. An endpoint that rejects required preconditions fails the operation; the CLI does not fall back to unconditional checkpoint replacement.
 
 ## Development and releases
 
-The [release configuration](https://github.com/ebrake/pulumi-journaling/blob/main/journaling-release.json) pins the upstream commit and archive checksums. The [validation workflow](https://github.com/ebrake/pulumi-journaling/blob/main/.github/workflows/journaling-test.yml) runs regression tests, linters, lifecycle tests and the actual file, GCS, S3, Azure and PostgreSQL storage drivers against isolated local emulators. The [release workflow](https://github.com/ebrake/pulumi-journaling/blob/main/.github/workflows/journaling-release.yml) builds all four platform bundles, exercises the CLI, packages the launcher with the resulting checksums, and can publish to GitHub and PyPI. When hosted runners are unavailable, its prebuilt option accepts a reviewed draft release, verifies all platform and Python-package checksums and common source provenance, then publishes through the same trusted publisher.
+The [release configuration](https://github.com/ebrake/pulumi-journaling/blob/journaling/journaling-release.json) pins the upstream commit and archive checksums. The [validation workflow](https://github.com/ebrake/pulumi-journaling/blob/journaling/.github/workflows/journaling-test.yml) runs regression tests, linters, lifecycle tests and the actual file, GCS, S3, Azure and PostgreSQL storage drivers against isolated local emulators. The [release workflow](https://github.com/ebrake/pulumi-journaling/blob/journaling/.github/workflows/journaling-release.yml) builds all four platform bundles, exercises the CLI, packages the launcher with the resulting checksums, and can publish to GitHub and PyPI. When hosted runners are unavailable, its prebuilt option accepts a reviewed draft release, verifies all platform and Python-package checksums and common source provenance, then publishes through the same trusted publisher.
 
-The upstream [contributing guide](https://github.com/ebrake/pulumi-journaling/blob/main/CONTRIBUTING.md) covers the Go monorepo. Report fork issues in [this repository](https://github.com/ebrake/pulumi-journaling/issues). See [authors](https://github.com/ebrake/pulumi-journaling/blob/main/AUTHORS.md), [notices](https://github.com/ebrake/pulumi-journaling/blob/main/NOTICE) and the [Apache 2.0 license](https://github.com/ebrake/pulumi-journaling/blob/main/LICENSE).
+The upstream [contributing guide](https://github.com/ebrake/pulumi-journaling/blob/journaling/CONTRIBUTING.md) covers the Go monorepo. Report fork issues in [this repository](https://github.com/ebrake/pulumi-journaling/issues). See [authors](https://github.com/ebrake/pulumi-journaling/blob/journaling/AUTHORS.md), [notices](https://github.com/ebrake/pulumi-journaling/blob/journaling/NOTICE) and the [Apache 2.0 license](https://github.com/ebrake/pulumi-journaling/blob/journaling/LICENSE).
 
 See [CHANGELOG-FORK.md](CHANGELOG-FORK.md) for fork releases and links to the corresponding upstream Pulumi changes.
 

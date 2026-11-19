@@ -1,24 +1,24 @@
 {
-  "version": "3.275.0+journaling.2",
-  "upstreamVersion": "3.275.0",
-  "upstreamCommit": "cc3a399d789290e4d98becbbec4ffca3ad30230d",
+  "version": "3.277.0+journaling.1",
+  "upstreamVersion": "3.277.0",
+  "upstreamCommit": "a95f099fa05b8c561c511e0a1663b6bf4f2afafb",
   "upstreamArchives": {
     "darwin-arm64": {
-      "name": "pulumi-v3.275.0-darwin-arm64.tar.gz",
-      "sha256": "d60e74411c20bb10eabcc89bfc74fd45f81cba0629923827cefc670066b4bfc3"
+      "name": "pulumi-v3.277.0-darwin-arm64.tar.gz",
+      "sha256": "7344d062adc17a10c58cf621330270a50b138ed761ac1d90faf8988992aab71b"
     },
     "linux-amd64": {
-      "name": "pulumi-v3.275.0-linux-x64.tar.gz",
-      "sha256": "759920e5f4e2114f50d5b2e876d59b6ff3c00abcf0e75a9529162e8627fe5819"
+      "name": "pulumi-v3.277.0-linux-x64.tar.gz",
+      "sha256": "1e38f0fb69a14a326cf3acfaf975770e8de5d0771042f26292f0013d237b8393"
     },
     "linux-arm64": {
-      "name": "pulumi-v3.275.0-linux-arm64.tar.gz",
-      "sha256": "cebaa1a3a8ccf36dd46c3c1cc24f63ce7763ca18bd168cc491e8c6960e5ff8aa"
+      "name": "pulumi-v3.277.0-linux-arm64.tar.gz",
+      "sha256": "b9c2708bd13ffdcba79f555a0532893a9b5a44efca8e225d171b8f7b605b16ce"
     },
     "darwin-amd64": {
-      "name": "pulumi-v3.275.0-darwin-x64.tar.gz",
-      "sha256": "355901b635e6b5338f7224c46a45d789787273528037e172b9dd5855aeb3d562"
+      "name": "pulumi-v3.277.0-darwin-x64.tar.gz",
+      "sha256": "7f1d6a33e518fac2104900ef7ad62b485de31dca39575b09d14a5dbec81411f7"
     }
   },
-  "pythonVersion": "3.275.0.post2"
+  "pythonVersion": "3.277.0.post1"
 }

@@ -2,6 +2,13 @@
 
 Changes specific to this fork. CLI versions use `+journaling.N`; Python distributions use `.postN`.
 
+## 3.277.0+journaling.1 — 2026-11-19
+
+Python: `pulumi-journaling==3.277.0.post1`
+
+- Upgrade to Pulumi 3.277.0 with matching upstream language hosts and Python SDK
+- Retain DIY journal recovery on both stacks when moving resources with the new `pulumi state move --parent` option
+
 ## 3.275.0+journaling.2 — 2026-11-12
 
 Python: `pulumi-journaling==3.275.0.post2`
@@ -41,4 +48,4 @@ Python: `pulumi-journaling==3.274.1.post1`
 
 ## Upstream Pulumi changes
 
-For the Pulumi changes included in each base version, read the upstream changelog: [3.275.0](https://github.com/pulumi/pulumi/releases/tag/v3.275.0) · [3.274.1](https://github.com/pulumi/pulumi/releases/tag/v3.274.1).
+For the Pulumi changes included in each base version, read the upstream changelog: [3.277.0](https://github.com/pulumi/pulumi/releases/tag/v3.277.0) · [3.275.0](https://github.com/pulumi/pulumi/releases/tag/v3.275.0) · [3.274.1](https://github.com/pulumi/pulumi/releases/tag/v3.274.1).
