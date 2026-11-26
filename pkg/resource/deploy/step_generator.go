@@ -781,6 +781,11 @@ func (sg *stepGenerator) getOldResource(
 func (sg *stepGenerator) generateSteps(ctx context.Context, event RegisterResourceEvent) ([]Step, bool, error) {
 	goal := event.Goal()
 
+	// Downgrade any OutputValues carried on the goal to plain values so the rest of the step generator
+	// (including provider Check calls and state storage) sees the historical shape. Remote components do
+	// not reach the step generator, so their OutputValues continue to flow through Construct untouched.
+	goal.Properties = downgradeOutputValues(goal.Properties)
+
 	parent := sg.deployment.rewriteStateMigrationURN(goal.Parent)
 
 	// Some goal settings are based on the parent settings so make sure our parent is correct.
@@ -2991,9 +2996,9 @@ func (sg *stepGenerator) providerChanged(urn resource.URN, old, new *pkgresource
 
 	diff, err := newProv.DiffConfig(context.TODO(), plugin.DiffConfigRequest{
 		URN:           newRef.URN(),
-		OldInputs:     resource.FromResourcePropertyMap(providers.FilterProviderConfig(oldRes.Inputs)),
+		OldInputs:     providers.FilterProviderConfig(resource.FromResourcePropertyMap(oldRes.Inputs)),
 		OldOutputs:    resource.FromResourcePropertyMap(oldRes.Outputs),
-		NewInputs:     resource.FromResourcePropertyMap(providers.FilterProviderConfig(newRes.Inputs)),
+		NewInputs:     providers.FilterProviderConfig(resource.FromResourcePropertyMap(newRes.Inputs)),
 		AllowUnknowns: true,
 	})
 	if err != nil {
@@ -3848,7 +3853,7 @@ func unwrapSecretsAndOutputs(value property.Value) property.Value {
 
 	if value.IsArray() {
 		arr := []property.Value{}
-		for _, e := range value.AsArray().All {
+		for _, e := range value.AsArray().All() {
 			arr = append(arr, unwrapSecretsAndOutputs(e))
 		}
 		return property.New(arr)
@@ -3856,11 +3861,40 @@ func unwrapSecretsAndOutputs(value property.Value) property.Value {
 
 	if value.IsMap() {
 		obj := map[string]property.Value{}
-		for key, e := range value.AsMap().All {
+		for key, e := range value.AsMap().All() {
 			obj[key] = unwrapSecretsAndOutputs(e)
 		}
 		return property.New(obj)
 	}
 
 	return value
+}
+
+// downgradeOutputValues recursively strips dependency information from a [property.Map].
+func downgradeOutputValues(m property.Map) property.Map {
+	result := map[string]property.Value{}
+	for k, v := range m.All() {
+		result[k] = downgradeOutputPropertyValue(v)
+	}
+	return property.NewMap(result)
+}
+
+func downgradeOutputPropertyValue(v property.Value) property.Value {
+	v = v.WithDependencies(nil)
+	switch {
+	case v.IsMap():
+		v = property.WithGoValue(v, downgradeOutputValues(v.AsMap()))
+	case v.IsArray():
+		arr := v.AsArray().AsSlice()
+		newArr := make([]property.Value, len(arr))
+		for i, elem := range arr {
+			newArr[i] = downgradeOutputPropertyValue(elem)
+		}
+		v = property.WithGoValue(v, property.NewArray(newArr))
+	case v.IsResourceReference():
+		ref := v.AsResourceReference()
+		ref.ID = downgradeOutputPropertyValue(ref.ID)
+		v = property.WithGoValue(v, ref)
+	}
+	return v
 }

@@ -53,7 +53,7 @@ func newPolicyExceptionRemoveCmd(ws pkgWorkspace.Context, lm cmdBackend.LoginMan
 	args.outputFormat = defaultPolicyExceptionRemoveOutputFormat()
 
 	cmd := &cobra.Command{
-		Use:     "remove <exception-id>",
+		Use:     "remove",
 		Aliases: []string{"rm", "delete"},
 		Short:   "[EXPERIMENTAL] Remove a policy exception",
 		Long: "[EXPERIMENTAL] Remove a policy exception.\n" +
@@ -104,7 +104,7 @@ func runPolicyExceptionRemove(
 	apiErr, _ := errors.AsType[*apitype.ErrorResponse](err)
 	switch {
 	case apiErr != nil && apiErr.Code == http.StatusNotFound:
-		return fmt.Errorf("policy exception %s not found in %s", exceptionID, org)
+		return policyExceptionNotFound(ctx, c, org, exceptionID)
 	// Removing an exception that's already removed does what was asked for.
 	case apiErr != nil && apiErr.Code == http.StatusConflict && strings.Contains(apiErr.Message, "already removed"):
 		fmt.Fprintf(stderr, "Policy exception %s is already removed.\n", exceptionID)

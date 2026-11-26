@@ -1,0 +1,4 @@
+component: cli
+kind: improvement
+body: Upgrade pulumi-journaling to Pulumi 3.278.0
+time: 2026-11-26T12:09:42.091927Z
