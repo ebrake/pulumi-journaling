@@ -308,7 +308,7 @@ func NewUpCmd() *cobra.Command {
 			Opts:               opts,
 			StackConfiguration: cfg,
 			SecretsManager:     sm,
-			SecretsProvider:    cmdBackend.SecretsProvider(cmdBackend.DefaultLoginManager),
+			SecretsProvider:    cmdBackend.SecretsProvider(lm),
 			Scopes:             backend.CancellationScopes,
 			CoherenceWindow:    coherenceWindow,
 		}, nil /* events */)
@@ -593,7 +593,7 @@ func NewUpCmd() *cobra.Command {
 			Opts:               opts,
 			StackConfiguration: cfg,
 			SecretsManager:     sm,
-			SecretsProvider:    cmdBackend.SecretsProvider(cmdBackend.DefaultLoginManager),
+			SecretsProvider:    cmdBackend.SecretsProvider(lm),
 			Scopes:             backend.CancellationScopes,
 			CoherenceWindow:    coherenceWindow,
 		}, nil /* events */)

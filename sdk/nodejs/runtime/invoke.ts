@@ -28,7 +28,9 @@ import {
     containsUnknownValues,
 } from "./rpc";
 import { awaitStackRegistrations, excessiveDebugOutput, getMonitor, rpcKeepAlive, terminateRpcs } from "./settings";
-import { getStore } from "./state";
+import { getParentStackTraceHandle, getStore } from "./state";
+import { getStackTrace, marshalSourcePosition, marshalStackTrace } from "./stackTrace";
+import type { SourcePosition } from "./resource";
 import { ensureNotInStateMigration } from "./stateMigration";
 
 import { CustomResource, DependencyResource, ProviderResource, Resource } from "../resource";
@@ -196,6 +198,9 @@ async function invokeAsync(
     containsSecrets: boolean;
     dependencies: Resource[];
 }> {
+    const stackTrace = getStackTrace(0);
+    const sourcePosition = getInvokeSourcePosition(stackTrace);
+    const parentStackTraceHandle = getParentStackTraceHandle();
     const label = `Invoking function: tok=${tok} asynchronously`;
     log.debug(label + (excessiveDebugOutput ? `, props=${JSON.stringify(props)}` : ``));
 
@@ -281,11 +286,14 @@ async function invokeAsync(
         // if any of the inputs are secret, the invoke response should be marked as secret
         const [plainInputs, inputsContainSecrets] = unwrapSecretValues(serialized);
         const req = await createInvokeRequest(tok, plainInputs, provider, opts, packageRef, invokeDependsOn);
+        req.setSourceposition(marshalSourcePosition(sourcePosition));
+        req.setStacktrace(marshalStackTrace(stackTrace));
+        req.setParentstacktracehandle(parentStackTraceHandle || "");
 
         const resp: any = await debuggablePromise(
             new Promise((innerResolve, innerReject) =>
                 monitor.invoke(req, (err: grpc.ServiceError, innerResponse: any) => {
-                    log.debug(`Invoke RPC finished: tok=${tok}; err: ${err}, resp: ${innerResponse}`);
+                    log.debug(`Invoke RPC finished: tok=${tok}; err: ${err}`);
                     if (err) {
                         // If the monitor is unavailable, it is in the process of shutting down or has already
                         // shut down. Don't emit an error and don't do any more RPCs, just exit.
@@ -338,6 +346,25 @@ async function invokeAsync(
     } finally {
         done();
     }
+}
+
+function getInvokeSourcePosition(stackTrace: (SourcePosition | undefined)[]): SourcePosition | undefined {
+    // Generated SDK functions call the runtime's Invoke helpers. Walk past our internal frames (the ones in this file),
+    // then skip the SDK wrapper to select its caller in the user's program. The stack is captured in invokeAsync, so its
+    // first frame identifies this file. If the core Invoke implementation spans multiple files, we need to update this
+    // boundary detection.
+    const invokeURI = stackTrace[0]?.uri;
+    if (invokeURI === undefined) {
+        return undefined;
+    }
+    for (let index = 0; index < stackTrace.length; index++) {
+        if (stackTrace[index]?.uri === invokeURI) {
+            continue;
+        }
+        const callerIndex = index + 1; // skip the wrapper in the SDK
+        return stackTrace[callerIndex] ?? stackTrace[index];
+    }
+    return undefined;
 }
 
 async function createInvokeRequest(
@@ -502,7 +529,7 @@ function callAsync<T>(
                         monitor.call(
                             req,
                             (err: grpc.ServiceError | null, innerResponse: providerproto.CallResponse) => {
-                                log.debug(`Call RPC finished: tok=${tok}; err: ${err}, resp: ${innerResponse}`);
+                                log.debug(`Call RPC finished: tok=${tok}; err: ${err}`);
                                 if (err) {
                                     // If the monitor is unavailable, it is in the process of shutting down or has already
                                     // shut down. Don't emit an error and don't do any more RPCs, just exit.

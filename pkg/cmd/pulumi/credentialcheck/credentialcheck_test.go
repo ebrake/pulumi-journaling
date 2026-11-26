@@ -134,10 +134,10 @@ func TestCheckPassesOnlyTheProvidersConfig(t *testing.T) {
 	prov.ConfigureF = func(_ context.Context, req plugin.ConfigureRequest) (plugin.ConfigureResponse, error) {
 		assert.Equal(t, 2, req.Inputs.Len())
 		assert.Equal(t, "us-east-1", req.Inputs.Get("region").AsString())
-		assert.False(t, req.Inputs.Get("region").Secret())
+		assert.False(t, req.Inputs.Get("region").IsSecret())
 		// Secrets reach the provider marked as secret, the same as during a deployment.
 		assert.Equal(t, "ciphertext", req.Inputs.Get("secretKey").AsString())
-		assert.True(t, req.Inputs.Get("secretKey").Secret())
+		assert.True(t, req.Inputs.Get("secretKey").IsSecret())
 		return plugin.ConfigureResponse{}, nil
 	}
 
@@ -362,4 +362,45 @@ func TestProbeTimeout(t *testing.T) {
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	var problem *Problem
 	assert.NotErrorAs(t, err, &problem, "a cancelled check says nothing about the credentials")
+}
+
+func TestProbeRemediation(t *testing.T) {
+	t.Parallel()
+
+	signIn := plugin.CommandRemediation{Description: "Sign in to AWS", Command: []string{"aws", "login"}}
+	ssoSignIn := plugin.CommandRemediation{Description: "Sign in to AWS", Command: []string{"aws", "sso", "login"}}
+
+	t.Run("first with a command", func(t *testing.T) {
+		t.Parallel()
+
+		mock := &plugin.MockProvider{
+			CheckConfigF: func(context.Context, plugin.CheckConfigRequest) (plugin.CheckConfigResponse, error) {
+				return plugin.CheckConfigResponse{Failures: []plugin.CheckConfigFailure{
+					{Property: "region", Reason: "expected a valid region"},
+					{Reason: "No valid credential sources found.", Remediations: []plugin.CommandRemediation{
+						{Description: "Nothing to run"}, {Command: []string{""}}, signIn,
+					}},
+					{Reason: "The SSO session has expired.", Remediations: []plugin.CommandRemediation{ssoSignIn}},
+				}}, nil
+			},
+		}
+		var problem *Problem
+		require.ErrorAs(t, probe(t.Context(), awsProvider, mock, property.Map{}), &problem)
+		assert.Equal(t, &signIn, problem.Remediation())
+	})
+
+	t.Run("none", func(t *testing.T) {
+		t.Parallel()
+
+		mock := &plugin.MockProvider{
+			CheckConfigF: func(context.Context, plugin.CheckConfigRequest) (plugin.CheckConfigResponse, error) {
+				return plugin.CheckConfigResponse{Failures: []plugin.CheckConfigFailure{
+					{Reason: "No valid credential sources found."},
+				}}, nil
+			},
+		}
+		var problem *Problem
+		require.ErrorAs(t, probe(t.Context(), awsProvider, mock, property.Map{}), &problem)
+		assert.Nil(t, problem.Remediation())
+	})
 }

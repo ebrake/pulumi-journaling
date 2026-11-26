@@ -1,25 +1,25 @@
 {
   "schemaVersion": 1,
   "repository": "ebrake/pulumi-journaling",
-  "version": "3.277.0+journaling.1",
-  "upstreamVersion": "3.277.0",
-  "sourceCommit": "4e3c38d06d9747bff00952815cce59cdf91f4219",
+  "version": "3.278.0+journaling.1",
+  "upstreamVersion": "3.278.0",
+  "sourceCommit": "f1e1f1d1269b183c3f94e4d4acc71b9592ef6d27",
   "artifacts": {
     "darwin-amd64": {
-      "url": "https://github.com/ebrake/pulumi-journaling/releases/download/v3.277.0+journaling.1/pulumi-journaling-v3.277.0-journaling.1-darwin-amd64.tar.gz",
-      "sha256": "808e897334a322b39a555883cc37552700080dd2545757422f9781085d6b3ee0"
+      "url": "https://github.com/ebrake/pulumi-journaling/releases/download/v3.278.0+journaling.1/pulumi-journaling-v3.278.0-journaling.1-darwin-amd64.tar.gz",
+      "sha256": "9f05ed0a8eadf7ce8e8d55e7e4cd13c7864c99564174b01b9feaac7c0bf0cd04"
     },
     "darwin-arm64": {
-      "url": "https://github.com/ebrake/pulumi-journaling/releases/download/v3.277.0+journaling.1/pulumi-journaling-v3.277.0-journaling.1-darwin-arm64.tar.gz",
-      "sha256": "e620814995d421310733382dab79ecca9644c0dd7789f42fc2e4e60a5ab8683d"
+      "url": "https://github.com/ebrake/pulumi-journaling/releases/download/v3.278.0+journaling.1/pulumi-journaling-v3.278.0-journaling.1-darwin-arm64.tar.gz",
+      "sha256": "df69fa7c0100510b2e161e62d3adf36914071e408e7c1be673a546d5b73ef9e8"
     },
     "linux-amd64": {
-      "url": "https://github.com/ebrake/pulumi-journaling/releases/download/v3.277.0+journaling.1/pulumi-journaling-v3.277.0-journaling.1-linux-amd64.tar.gz",
-      "sha256": "d7a08021dde64f3f71a559ed6424e7a82eef5a5b8ef7d1b6501673704206f8df"
+      "url": "https://github.com/ebrake/pulumi-journaling/releases/download/v3.278.0+journaling.1/pulumi-journaling-v3.278.0-journaling.1-linux-amd64.tar.gz",
+      "sha256": "709e1fd3e4f1fc73e9e8b6451231de417d30f46a535dd6806cdfffb6405392a2"
     },
     "linux-arm64": {
-      "url": "https://github.com/ebrake/pulumi-journaling/releases/download/v3.277.0+journaling.1/pulumi-journaling-v3.277.0-journaling.1-linux-arm64.tar.gz",
-      "sha256": "a6ec89f2eaff7cc2734750a33cd1a6e044920cebff2a9e8c3250c87dd16e0045"
+      "url": "https://github.com/ebrake/pulumi-journaling/releases/download/v3.278.0+journaling.1/pulumi-journaling-v3.278.0-journaling.1-linux-arm64.tar.gz",
+      "sha256": "0ba9ef6ab5bdb18b28d3d94d6c20e2f35b7af43827117f5503465fc616bf586f"
     }
   }
 }

@@ -143,7 +143,7 @@ func (cmd *stateRepairCmd) run(ctx context.Context) error {
 	if err := recoverJournalBeforeEdit(ctx, s); err != nil {
 		return err
 	}
-	snap, err := s.Snapshot(ctx, cmdBackend.SecretsProvider(cmdBackend.DefaultLoginManager))
+	snap, err := s.Snapshot(ctx, cmdBackend.SecretsProvider(cmd.LoginManager))
 	if err != nil {
 		return err
 	} else if snap == nil {
