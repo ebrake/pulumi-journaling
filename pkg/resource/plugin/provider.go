@@ -227,6 +227,12 @@ type CheckConfigResponse struct {
 type CheckConfigFailure struct {
 	Property resource.PropertyKey // the provider configuration property that failed checking.
 	Reason   string               // the reason the property failed to check.
+
+	// Remediations are commands that resolve the failure. Only CheckConfig2 carries them.
+	Remediations []CommandRemediation
+
+	// Hint is a product hint relevant to the failure, or nil if there is none. Only CheckConfig2 carries it.
+	Hint *Hint
 }
 
 type DiffConfigRequest struct {

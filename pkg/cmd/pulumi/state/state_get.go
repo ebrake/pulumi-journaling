@@ -54,7 +54,7 @@ func newStateGetCommand(ws pkgWorkspace.Context, lm cmdBackend.LoginManager) *co
 	}
 
 	cmd := &cobra.Command{
-		Use:   "get [resource]",
+		Use:   "get",
 		Short: "Show a resource's state",
 		Long: `Show a resource's state
 
@@ -73,7 +73,7 @@ this command will prompt for one.`,
 			if err != nil {
 				return fmt.Errorf("load stack: %w", err)
 			}
-			snap, err := s.Snapshot(ctx, cmdBackend.SecretsProvider(cmdBackend.DefaultLoginManager))
+			snap, err := s.Snapshot(ctx, cmdBackend.SecretsProvider(lm))
 			if err != nil {
 				return fmt.Errorf("load stack snapshot: %w", err)
 			}
@@ -252,7 +252,7 @@ func renderResourceStateText(cmd *cobra.Command, res *pkgresource.State, showSec
 // (double-underscore) keys.
 func renderProperties(ctx context.Context, props property.Map, showSecrets bool) (map[string]any, error) {
 	visible := make(map[string]property.Value, props.Len())
-	for k, v := range props.All {
+	for k, v := range props.All() {
 		if !resource.IsInternalPropertyKey(resource.PropertyKey(k)) {
 			visible[k] = v
 		}

@@ -1,10 +1,10 @@
 # pulumi-journaling
 
-An independent fork of [Pulumi](https://github.com/pulumi/pulumi), maintained by **E Brake** <ebrake123@icloud.com>, with hardened, recoverable journaling for every DIY state storage backend: local files, Amazon S3 and compatible stores, Google Cloud Storage, Azure Blob Storage, and PostgreSQL. Based on upstream **v3.277.0** at commit [`a95f099fa05b8c561c511e0a1663b6bf4f2afafb`](https://github.com/pulumi/pulumi/commit/a95f099fa05b8c561c511e0a1663b6bf4f2afafb).
+An independent fork of [Pulumi](https://github.com/pulumi/pulumi), maintained by **E Brake** <ebrake123@icloud.com>, with hardened, recoverable journaling for every DIY state storage backend: local files, Amazon S3 and compatible stores, Google Cloud Storage, Azure Blob Storage, and PostgreSQL. Based on upstream **v3.278.0** at commit [`783a0060186b6b8d9392ee098db087c8aa01062b`](https://github.com/pulumi/pulumi/commit/783a0060186b6b8d9392ee098db087c8aa01062b).
 
 This project is independently maintained and is not affiliated with, sponsored by, or endorsed by Pulumi Corporation. Pulumi is a trademark of Pulumi Corporation.
 
-## Install
+## Install the latest published release
 
 ```sh
 python -m pip install pulumi-journaling==3.277.0.post1

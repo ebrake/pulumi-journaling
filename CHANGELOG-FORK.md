@@ -2,6 +2,10 @@
 
 Changes specific to this fork. CLI versions use `+journaling.N`; Python distributions use `.postN`.
 
+## Unreleased
+
+- Upgrade the fork to [Pulumi 3.278.0](https://github.com/pulumi/pulumi/releases/tag/v3.278.0)
+
 ## 3.277.0+journaling.1 — 2026-11-19
 
 Python: `pulumi-journaling==3.277.0.post1`

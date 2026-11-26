@@ -1098,7 +1098,7 @@ func (rm *resmon) Invoke(
 		}
 		rootSet.Add(urn)
 	}
-	for _, v := range args.All {
+	for _, v := range args.All() {
 		addOutputDependencies(rootSet, v)
 	}
 
@@ -1326,7 +1326,7 @@ func (rm *resmon) Call(ctx context.Context, req *pulumirpc.ResourceCallRequest) 
 	defer stackTraceHandle.Release()
 
 	// If we have output values we can add the dependencies from them to the args dependencies map we send to the provider.
-	for key, output := range args.All {
+	for key, output := range args.All() {
 		pk := resource.PropertyKey(key)
 		argDependencies[pk] = extendOutputDependencies(argDependencies[pk], output)
 	}
@@ -1375,7 +1375,7 @@ func (rm *resmon) Call(ctx context.Context, req *pulumirpc.ResourceCallRequest) 
 	if ret.ReturnDependencies == nil {
 		ret.ReturnDependencies = map[resource.PropertyKey][]resource.URN{}
 	}
-	for k, v := range ret.Return.All {
+	for k, v := range ret.Return.All() {
 		pk := resource.PropertyKey(k)
 		ret.ReturnDependencies[pk] = extendOutputDependencies(ret.ReturnDependencies[pk], v)
 	}
@@ -2265,8 +2265,8 @@ func (s *sourcePositions) getFromRequest(req hasSourcePosition) (string, stackTr
 		if handle := req.GetParentStackTraceHandle(); handle != "" {
 			if parent, ok := s.stackTraces.Load(handle); ok {
 				newStack := make(stackTrace, 0, len(parent)+len(stack))
-				newStack = append(newStack, parent...)
 				newStack = append(newStack, stack...)
+				newStack = append(newStack, parent...)
 				stack = newStack
 			}
 		}
@@ -2539,7 +2539,7 @@ func (rm *resmon) RegisterResource(ctx context.Context,
 		// and must not inherit the top-level set.
 		// Clone so that downstream code merging a property's Output-value dependencies into its set does not
 		// leak those dependencies into every other property via a shared underlying set instance.
-		for k := range props.All {
+		for k := range props.All() {
 			propertyDependencies[resource.PropertyKey(k)] = dependencies.Clone()
 		}
 	} else {
@@ -2802,7 +2802,7 @@ func (rm *resmon) RegisterResource(ctx context.Context,
 		// Now we've run the transforms we can rebuild the property dependency maps. If we have output values we can add the
 		// dependencies from them to the dependencies map we send to the provider and save to state.
 		propertyDependencies = make(map[resource.PropertyKey]mapset.Set[resource.URN])
-		for key, output := range props.All {
+		for key, output := range props.All() {
 			pk := resource.PropertyKey(key)
 			deps := mapset.NewSet[resource.URN]()
 			addOutputDependencies(deps, output)
@@ -2811,7 +2811,7 @@ func (rm *resmon) RegisterResource(ctx context.Context,
 	} else {
 		// If we ran transforms we would have merged all the dependencies togther already, but if we didn't we want to
 		// ensure any output values add their dependencies to the dependencies map we send to the provider.
-		for key, output := range props.All {
+		for key, output := range props.All() {
 			pk := resource.PropertyKey(key)
 			if propertyDependencies[pk] == nil {
 				propertyDependencies[pk] = mapset.NewSet[resource.URN]()
@@ -2827,20 +2827,18 @@ func (rm *resmon) RegisterResource(ctx context.Context,
 	}
 
 	if sdkproviders.IsProviderType(t) {
-		// providers.SetProvider* mutate a resource.PropertyMap in-place; convert at the boundary.
-		legacyProps := resource.ToResourcePropertyMap(props)
 		if opts.GetVersion() != "" {
 			version, err := semver.Parse(opts.GetVersion())
 			if err != nil {
 				return nil, fmt.Errorf("%s: passed invalid version: %w", label, err)
 			}
-			providers.SetProviderVersion(legacyProps, &version)
+			props = providers.SetProviderVersion(props, &version)
 		}
 		if opts.GetPluginDownloadUrl() != "" {
-			providers.SetProviderURL(legacyProps, opts.GetPluginDownloadUrl())
+			props = providers.SetProviderURL(props, opts.GetPluginDownloadUrl())
 		}
 		if len(req.GetEnvVarMappings()) > 0 {
-			providers.SetEnvironmentVariableMappings(legacyProps, req.GetEnvVarMappings())
+			props = providers.SetEnvironmentVariableMappings(props, req.GetEnvVarMappings())
 		}
 		if req.GetPackageRef() != "" {
 			// If the provider resource has a package ref then we need to set all it's input fields as in
@@ -2852,17 +2850,17 @@ func (rm *resmon) RegisterResource(ctx context.Context,
 			}
 
 			if providerReq.Version() != nil {
-				providers.SetProviderVersion(legacyProps, providerReq.Version())
+				props = providers.SetProviderVersion(props, providerReq.Version())
 			}
 			if providerReq.PluginDownloadURL() != "" {
-				providers.SetProviderURL(legacyProps, providerReq.PluginDownloadURL())
+				props = providers.SetProviderURL(props, providerReq.PluginDownloadURL())
 			}
 			if providerReq.PluginChecksums() != nil {
-				providers.SetProviderChecksums(legacyProps, providerReq.PluginChecksums())
+				props = providers.SetProviderChecksums(props, providerReq.PluginChecksums())
 			}
 			if providerReq.Parameterization() != nil {
-				providers.SetProviderName(legacyProps, providerReq.Name())
-				providers.SetProviderParameterization(legacyProps, providerReq.Parameterization())
+				props = providers.SetProviderName(props, providerReq.Name())
+				props = providers.SetProviderParameterization(props, providerReq.Parameterization())
 			}
 		}
 
@@ -2871,13 +2869,12 @@ func (rm *resmon) RegisterResource(ctx context.Context,
 		defaultProvider, ok := rm.defaultProviders.defaultProviderInfo[sdkproviders.GetProviderPackage(t)]
 		if ok && opts.GetVersion() == "" && opts.GetPluginDownloadUrl() == "" {
 			if defaultProvider.Version != nil {
-				providers.SetProviderVersion(legacyProps, defaultProvider.Version)
+				props = providers.SetProviderVersion(props, defaultProvider.Version)
 			}
 			if defaultProvider.PluginDownloadURL != "" {
-				providers.SetProviderURL(legacyProps, defaultProvider.PluginDownloadURL)
+				props = providers.SetProviderURL(props, defaultProvider.PluginDownloadURL)
 			}
 		}
-		props = resource.FromResourcePropertyMap(legacyProps)
 	}
 
 	protect := opts.Protect
@@ -2960,16 +2957,6 @@ func (rm *resmon) RegisterResource(ctx context.Context,
 			}
 			resourceHooks[hookType] = append(resourceHooks[hookType], names...)
 		}
-	}
-
-	// At this point we're going to forward these properties to the rest of the engine and potentially to providers. As
-	// we add features to the code above (most notably transforms) we could end up with more instances of `OutputValue`
-	// than the rest of the system historically expects. To minimize the disruption we downgrade `OutputValue`s with no
-	// dependencies down to `Computed` and `Secret` or their plain values. We only do this for non-remote resources.
-	// Remote resources already deal with `OutputValue`s and even though it would be more consistent to downgrade them
-	// here it would be a break change.
-	if !remote {
-		props = downgradeOutputValues(props)
 	}
 
 	logging.V(5).Infof(
@@ -3575,42 +3562,13 @@ func decorateResourceSpans(span opentracing.Span, method string, req, resp any, 
 	}
 }
 
-// downgradeOutputValues recursively strips dependency information from a [property.Map].
-func downgradeOutputValues(m property.Map) property.Map {
-	result := map[string]property.Value{}
-	for k, v := range m.All {
-		result[k] = downgradeOutputPropertyValue(v)
-	}
-	return property.NewMap(result)
-}
-
-func downgradeOutputPropertyValue(v property.Value) property.Value {
-	v = v.WithDependencies(nil)
-	switch {
-	case v.IsMap():
-		v = property.WithGoValue(v, downgradeOutputValues(v.AsMap()))
-	case v.IsArray():
-		arr := v.AsArray().AsSlice()
-		newArr := make([]property.Value, len(arr))
-		for i, elem := range arr {
-			newArr[i] = downgradeOutputPropertyValue(elem)
-		}
-		v = property.WithGoValue(v, property.NewArray(newArr))
-	case v.IsResourceReference():
-		ref := v.AsResourceReference()
-		ref.ID = downgradeOutputPropertyValue(ref.ID)
-		v = property.WithGoValue(v, ref)
-	}
-	return v
-}
-
 // upgradeOutputValues ensures each value in m carries at least the dependencies recorded
 // for its key in propertyDependencies.
 func upgradeOutputValues(
 	m property.Map, propertyDependencies map[resource.PropertyKey]mapset.Set[resource.URN],
 ) property.Map {
 	result := map[string]property.Value{}
-	for k, v := range m.All {
+	for k, v := range m.All() {
 		if deps, has := propertyDependencies[resource.PropertyKey(k)]; has {
 			current := mapset.NewSet[resource.URN]()
 			addOutputDependencies(current, v)
@@ -3638,12 +3596,12 @@ func addOutputDependencies(deps mapset.Set[resource.URN], v property.Value) {
 		addOutputDependencies(deps, ref.ID)
 	}
 	if v.IsMap() {
-		for _, elem := range v.AsMap().All {
+		for _, elem := range v.AsMap().All() {
 			addOutputDependencies(deps, elem)
 		}
 	}
 	if v.IsArray() {
-		for _, elem := range v.AsArray().All {
+		for _, elem := range v.AsArray().All() {
 			addOutputDependencies(deps, elem)
 		}
 	}
