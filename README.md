@@ -7,7 +7,7 @@ This project is independently maintained and is not affiliated with, sponsored b
 ## Install the latest published release
 
 ```sh
-python -m pip install pulumi-journaling==3.277.0.post1
+python -m pip install pulumi-journaling==3.278.0.post1
 pulumi-journaling version
 ```
 
